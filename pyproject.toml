@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "studio-diffusion"
+version = "0.1.0"
+description = "Platform-specific aesthetic adapters for product photography via segmentation-conditioned diffusion"
+requires-python = ">=3.10"
+readme = "README.md"
+license = { text = "MIT" }
+dependencies = []          # use requirements.txt for full pinned deps
+
+[project.optional-dependencies]
+dev = ["pytest>=8.1.0", "black>=24.4.0", "ruff>=0.4.0"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["segmentation*", "adapters*", "evaluation*", "inference*", "data*"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311"]
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

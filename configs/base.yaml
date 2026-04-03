@@ -1,0 +1,44 @@
+# Base configuration shared across all training runs
+# Override per-platform settings in configs/ip_adapter/<platform>.yaml
+# or configs/lora/<platform>.yaml
+
+model:
+  base: "stabilityai/stable-diffusion-xl-base-1.0"
+  vae: "madebyollin/sdxl-vae-fp16-fix"
+  controlnet: "diffusers/controlnet-canny-sdxl-1.0"   # swap for seg-trained ControlNet
+
+training:
+  seed: 42
+  mixed_precision: "fp16"          # bf16 on Ampere+
+  gradient_checkpointing: true
+  dataloader_num_workers: 4
+  train_batch_size: 4
+  gradient_accumulation_steps: 4   # effective batch = 16
+  max_train_steps: 5000
+  checkpointing_steps: 500
+  validation_steps: 250
+
+optimizer:
+  type: "adamw"
+  learning_rate: 1.0e-4
+  weight_decay: 0.01
+  beta1: 0.9
+  beta2: 0.999
+  epsilon: 1.0e-8
+
+lr_scheduler:
+  type: "cosine"
+  num_warmup_steps: 200
+
+noise:
+  prediction_type: "epsilon"       # standard diffusion MSE loss
+  snr_gamma: 5.0                   # min-SNR weighting
+
+logging:
+  project: "studio-diffusion"
+  report_to: "wandb"
+
+paths:
+  output_dir: "checkpoints"
+  data_root: "data"
+  results_dir: "results"

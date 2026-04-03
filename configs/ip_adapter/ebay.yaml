@@ -1,0 +1,32 @@
+defaults:
+  - base
+
+platform: ebay
+adapter_type: ip_adapter
+
+description: >
+  IP-Adapter for eBay aesthetic: bright even lighting, plain or gradient
+  background, sharp focus on subject, minimal post-processing, utilitarian clarity.
+
+data:
+  platform_dir: "data/platform_sets/ebay"
+  train_split: 0.8
+  image_size: 1024
+  center_crop: true
+
+ip_adapter:
+  image_encoder: "openai/clip-vit-large-patch14-336"
+  proj_hidden_size: 1280
+  num_tokens: 16
+  adapter_scale: 1.0
+
+training:
+  max_train_steps: 3000
+  learning_rate: 1.0e-4
+  train_batch_size: 2
+
+hyperparameter_sweep:
+  learning_rate: [1.0e-5, 5.0e-5, 1.0e-4, 5.0e-4]
+  max_train_steps: [1000, 2000, 3000, 5000]
+  adapter_scale: [0.5, 0.75, 1.0, 1.25]
+  train_data_fraction: [0.25, 0.5, 0.75, 1.0]
