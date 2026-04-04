@@ -38,12 +38,36 @@ import pandas as pd
 from tqdm import tqdm
 
 
-# ABO image filenames are stored as "<hash_prefix>/<image_id>.jpg"
-# where hash_prefix is the first 2 characters of the image_id.
-def _resolve_image_path(image_id: str, images_dir: Path) -> Path | None:
-    prefix = image_id[:2]
-    candidate = images_dir / prefix / f"{image_id}.jpg"
-    return candidate if candidate.exists() else None
+def _load_image_map(metadata_dir: Path) -> dict[str, str]:
+    """
+    Load the image_id → relative path mapping from images.csv.gz
+    (downloaded alongside the listing metadata).
+    Returns {image_id: 'prefix/hash.jpg'}.
+    """
+    csv_gz = metadata_dir / "images.csv.gz"
+    if not csv_gz.exists():
+        return {}
+    mapping: dict[str, str] = {}
+    with gzip.open(csv_gz, "rt", encoding="utf-8") as f:
+        f.readline()  # header: image_id,height,width,path
+        for line in f:
+            parts = line.strip().split(",")
+            if len(parts) >= 4:
+                mapping[parts[0]] = parts[3]
+    return mapping
+
+
+def _resolve_image_path(
+    image_id: str,
+    images_dir: Path,
+    image_map: dict[str, str],
+) -> Path | None:
+    """Resolve image_id to a local file path via the images.csv.gz mapping."""
+    rel_path = image_map.get(image_id)
+    if rel_path:
+        candidate = images_dir / rel_path
+        return candidate if candidate.exists() else None
+    return None
 
 
 def _resolve_render_paths(
@@ -65,14 +89,19 @@ def parse_metadata(
     renders_dir: Path,
     country_filter: str | None,
 ) -> list[dict]:
-    gz_files = sorted(metadata_dir.glob("*.json.gz"))
+    gz_files = sorted(p for p in metadata_dir.glob("*.json.gz") if "images" not in p.name)
     if not gz_files:
         print(
-            f"[ERROR] No .json.gz files found in {metadata_dir}.\n"
-            "        Run  bash data/download_abo.sh  first.",
+            f"[ERROR] No listing .json.gz files found in {metadata_dir}.\n"
+            "        Run  python data/fetch_abo.py  first.",
             file=sys.stderr,
         )
         sys.exit(1)
+
+    # Load image_id → on-disk path mapping
+    image_map = _load_image_map(metadata_dir)
+    if not image_map:
+        print("[WARNING] images.csv.gz not found — image path resolution will fail.")
 
     records = []
     skipped_country = 0
@@ -96,13 +125,13 @@ def parse_metadata(
 
                 item_id      = item.get("item_id", "")
                 main_img_id  = item.get("main_image_id", "")
-                product_type = item.get("product_type", [{}])
+                product_type = item.get("product_type", "UNKNOWN")
                 if isinstance(product_type, list) and product_type:
                     product_type = product_type[0].get("value", "UNKNOWN")
-                else:
+                elif not isinstance(product_type, str):
                     product_type = "UNKNOWN"
 
-                image_path = _resolve_image_path(main_img_id, images_dir) if main_img_id else None
+                image_path = _resolve_image_path(main_img_id, images_dir, image_map) if main_img_id else None
                 if image_path is None:
                     skipped_no_image += 1
                     continue

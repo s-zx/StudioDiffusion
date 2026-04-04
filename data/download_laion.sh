@@ -1,80 +1,73 @@
 #!/usr/bin/env bash
-# Download LAION-Aesthetics v2 (score >= 6.0) using img2dataset.
+# Download LAION-Aesthetics images (score >= 6.0) from limingcv/LAION_Aesthetics_512
+# on HuggingFace. Each parquet shard contains ~925 images embedded as bytes —
+# no external URL fetching or img2dataset needed.
 #
-# Uses the public HuggingFace dataset  laion/aesthetics_6plus  which is
-# pre-filtered to CLIP aesthetic score >= 6.0 (~600K images, ~300 GB raw).
-#
-# To keep storage manageable we download a capped subset via --max_shard_count.
-# Remove that flag to get the full dataset.
-#
-# Requires:
-#   pip install img2dataset huggingface-hub
+# Requires: pip install huggingface_hub pandas Pillow
 #
 # Usage:
-#   bash data/download_laion.sh               # default: 50K images
-#   bash data/download_laion.sh --full        # full ~600K images (warning: large)
-#   bash data/download_laion.sh --n_shards 10 # custom shard count
+#   bash data/download_laion.sh               # default: 6 shards ≈ 5,500 images
+#   bash data/download_laion.sh --n_shards 20 # ≈ 18,500 images
+#   bash data/download_laion.sh --full        # all 3,041 shards ≈ 2.8M images (large!)
 
 set -euo pipefail
 
-DEST="data/raw/laion_aesthetics"
-PARQUET_DIR="$DEST/parquet"
+PROJ="$(cd "$(dirname "$0")/.." && pwd)"
+N_SHARDS=6
 FULL=false
-N_SHARDS=5          # each shard ≈ 1,000 images ≈ 10K images for 10 shards
 
 for arg in "$@"; do
   case "$arg" in
-    --full)            FULL=true ;;
-    --n_shards)        shift; N_SHARDS="$1" ;;
-    --n_shards=*)      N_SHARDS="${arg#*=}" ;;
+    --full)          FULL=true ;;
+    --n_shards=*)    N_SHARDS="${arg#*=}" ;;
+    --n_shards)      shift; N_SHARDS="$1" ;;
   esac
 done
 
-mkdir -p "$PARQUET_DIR" "$DEST/images"
-
-# ---- Step 1: Download parquet metadata from HuggingFace ----
-echo "[LAION] Downloading parquet index from laion/aesthetics_6plus ..."
-python - <<EOF
-from huggingface_hub import snapshot_download
-snapshot_download(
-    repo_id="laion/aesthetics_6plus",
-    repo_type="dataset",
-    local_dir="$PARQUET_DIR",
-    ignore_patterns=["*.arrow", "*.lock", "README*"],
-)
-print("[LAION] Parquet files downloaded.")
-EOF
-
-# ---- Step 2: Download images via img2dataset ----
 if [[ "$FULL" == "true" ]]; then
-  SHARD_FLAG=""
-  echo "[LAION] Downloading FULL dataset (this may take many hours and ~300 GB)..."
-else
-  SHARD_FLAG="--max_shard_count $N_SHARDS"
-  echo "[LAION] Downloading capped subset (${N_SHARDS} shards ≈ $((N_SHARDS * 1000)) images)..."
+  N_SHARDS=3041
 fi
 
-img2dataset \
-  --url_list          "$PARQUET_DIR" \
-  --input_format      "parquet" \
-  --url_col           "url" \
-  --caption_col       "caption" \
-  --output_folder     "$DEST/images" \
-  --output_format     "webdataset" \
-  --image_size        512 \
-  --min_image_size    256 \
-  --resize_mode       "keep_ratio" \
-  --number_sample_per_shard 1000 \
-  --processes_count   8 \
-  --thread_count      64 \
-  --save_additional_columns '["similarity","watermark_score","aesthetic_score"]' \
-  --enable_wandb      false \
-  ${SHARD_FLAG}
+echo "[LAION] Downloading ${N_SHARDS} shards from limingcv/LAION_Aesthetics_512 ..."
 
-echo ""
-echo "[LAION] Download complete."
-echo "  Parquet metadata : $PARQUET_DIR"
-echo "  Images (webdataset tars) : $DEST/images/"
-echo ""
-echo "Note: LAION images are supplementary. Platform curation (SD-16) primarily"
-echo "      uses ABO + DeepFashion2. LAION can be added as an extra --sources arg."
+"$PROJ/.venv/bin/python" - <<EOF
+import io, os
+from pathlib import Path
+from huggingface_hub import hf_hub_download
+import pandas as pd
+from PIL import Image
+
+OUT_DIR = Path("$PROJ/data/raw/laion_aesthetics/images")
+OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+N = $N_SHARDS
+total = 0
+for shard_idx in range(N):
+    fname = f"data/train-{shard_idx:05d}-of-03041.parquet"
+    print(f"[LAION] Shard {shard_idx+1}/{N}: {fname}")
+    local = hf_hub_download(
+        repo_id="limingcv/LAION_Aesthetics_512",
+        repo_type="dataset",
+        filename=fname,
+    )
+    df = pd.read_parquet(local)
+    shard_dir = OUT_DIR / f"shard_{shard_idx:05d}"
+    shard_dir.mkdir(exist_ok=True)
+    saved = 0
+    for i, row in df.iterrows():
+        try:
+            raw = row["image"]
+            if isinstance(raw, dict):
+                raw = raw.get("bytes", b"")
+            if not raw:
+                continue
+            img = Image.open(io.BytesIO(raw)).convert("RGB")
+            img.save(shard_dir / f"{i:06d}.jpg", quality=90)
+            saved += 1
+        except Exception:
+            continue
+    total += saved
+    print(f"  Saved {saved} images")
+
+print(f"\n[LAION] Total: {total:,} images saved to {OUT_DIR}")
+EOF
