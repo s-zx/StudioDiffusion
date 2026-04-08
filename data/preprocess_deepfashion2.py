@@ -100,14 +100,18 @@ def process_split(
     raw_dir: Path,
     split: str,
     out_masks_dir: Path,
+    num_workers: int = 8,
 ) -> list[dict]:
     """
-    Process one split (train / validation).
+    Process one split (train / validation) using parallel workers.
 
     Returns a list of manifest row dicts.
     """
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+
     image_dir = raw_dir / split / "image"
-    annot_dir = raw_dir / split / "annots"
+    # DeepFashion2 uses 'annos' (not 'annots')
+    annot_dir = raw_dir / split / "annos"
 
     if not annot_dir.exists():
         print(
@@ -125,75 +129,93 @@ def process_split(
     out_split_dir = out_masks_dir / split
     out_split_dir.mkdir(parents=True, exist_ok=True)
 
+    print(f"[DF2] {split}: {len(annot_files):,} annotations, {num_workers} workers")
+
     records = []
     errors = 0
 
-    for ann_path in tqdm(annot_files, desc=f"[DF2] {split}", unit="img"):
-        try:
-            with open(ann_path) as f:
-                ann = json.load(f)
-        except (json.JSONDecodeError, OSError) as e:
-            errors += 1
-            continue
-
-        image_id   = ann_path.stem        # e.g. "000001"
-        image_path = image_dir / f"{image_id}.jpg"
-
-        if not image_path.exists():
-            errors += 1
-            continue
-
-        # Collect all segmentation polygons across all items in the image
-        all_polygons: list[list[float]] = []
-        category_names: list[str] = []
-
-        for key in ("item1", "item2", "item3", "item4"):
-            item = ann.get(key)
-            if not item:
-                continue
-            seg = item.get("segmentation", [])
-            if seg:
-                all_polygons.extend(seg)
-            cat = item.get("category_name", "")
-            if cat:
-                category_names.append(cat)
-
-        if not all_polygons:
-            errors += 1
-            continue
-
-        try:
-            w, h = _get_image_size(image_path)
-        except Exception:
-            errors += 1
-            continue
-
-        mask = rasterize_polygons(all_polygons, w, h)
-        mask_path = out_split_dir / f"{image_id}.png"
-        Image.fromarray(mask).save(mask_path)
-
-        records.append({
-            "image_path":    str(image_path),
-            "mask_path":     str(mask_path),
-            "category_name": "|".join(category_names) if category_names else "unknown",
-            "source":        ann.get("source", "unknown"),
-            "split":         split,
-        })
+    with ProcessPoolExecutor(max_workers=num_workers) as pool:
+        futures = {
+            pool.submit(_process_one, ann_path, image_dir, out_split_dir): ann_path
+            for ann_path in annot_files
+        }
+        for fut in tqdm(as_completed(futures), total=len(futures), desc=f"[DF2] {split}", unit="img"):
+            result = fut.result()
+            if result is None:
+                errors += 1
+            else:
+                records.append(result)
 
     print(f"[DF2] {split}: {len(records):,} masks saved, {errors:,} skipped")
     return records
+
+
+def _process_one(
+    ann_path: Path,
+    image_dir: Path,
+    out_split_dir: Path,
+) -> dict | None:
+    """Worker function: process a single annotation file (runs in subprocess)."""
+    try:
+        with open(ann_path) as f:
+            ann = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+
+    image_id   = ann_path.stem
+    image_path = image_dir / f"{image_id}.jpg"
+    if not image_path.exists():
+        return None
+
+    all_polygons: list[list[float]] = []
+    category_names: list[str] = []
+
+    for key in ("item1", "item2", "item3", "item4"):
+        item = ann.get(key)
+        if not item:
+            continue
+        seg = item.get("segmentation", [])
+        if seg:
+            all_polygons.extend(seg)
+        cat = item.get("category_name", "")
+        if cat:
+            category_names.append(cat)
+
+    if not all_polygons:
+        return None
+
+    try:
+        w, h = _get_image_size(image_path)
+    except Exception:
+        return None
+
+    mask = rasterize_polygons(all_polygons, w, h)
+    mask_path = out_split_dir / f"{image_id}.png"
+    Image.fromarray(mask).save(mask_path)
+
+    return {
+        "image_path":    str(image_path),
+        "mask_path":     str(mask_path),
+        "category_name": "|".join(category_names) if category_names else "unknown",
+        "source":        ann.get("source", "unknown"),
+        "split":         ann_path.parent.parent.name,
+    }
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Convert DeepFashion2 polygon annotations to binary mask PNGs."
     )
-    parser.add_argument("--raw_dir",   type=Path, default=Path("data/raw/deepfashion2"))
+    parser.add_argument("--raw_dir",   type=Path, default=Path("data/raw/deepfashion2/deepfashion2_original_images"))
     parser.add_argument("--out_masks", type=Path, default=Path("data/processed/deepfashion2/masks"))
     parser.add_argument("--out_csv",   type=Path, default=Path("data/processed/deepfashion2_manifest.csv"))
     parser.add_argument(
         "--splits", nargs="+", default=["train", "validation"],
         help="Which splits to process."
+    )
+    parser.add_argument(
+        "--num_workers", type=int, default=8,
+        help="Number of parallel worker processes for mask rasterization."
     )
     args = parser.parse_args()
 
@@ -207,7 +229,7 @@ def main() -> None:
 
     all_records: list[dict] = []
     for split in args.splits:
-        records = process_split(args.raw_dir, split, args.out_masks)
+        records = process_split(args.raw_dir, split, args.out_masks, num_workers=args.num_workers)
         all_records.extend(records)
 
     if not all_records:

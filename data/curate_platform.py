@@ -15,6 +15,16 @@ Changes from v1
 - Train/val 80/20 split written as CSV manifests for each platform
 - Progress saved to an embedding cache so re-runs are fast
 
+Changes from v2
+---------------
+- More distinctive per-platform prompts (better cross-platform separation)
+- Soft assignment: --min_margin drops images whose best/2nd-best score gap is
+  too small (ambiguous style), improving set purity
+- Category-balanced sampling within each platform (--balance_categories) so the
+  adapter sees a diverse product mix rather than one dominant category
+- Resolution quality pre-filter: --min_resolution drops tiny/corrupt images
+  before CLIP embedding, saving time and avoiding low-quality training data
+
 Usage
 -----
 # Basic (ABO only)
@@ -22,20 +32,16 @@ python data/curate_platform.py \
     --sources data/raw/abo/images/small \
     --n_per_platform 400
 
-# Multi-source (ABO + DeepFashion2)
+# Multi-source with all improvements enabled
 python data/curate_platform.py \
-    --sources data/raw/abo/images/small data/raw/deepfashion2/train/image \
-    --n_per_platform 400 \
-    --output data/platform_sets \
-    --device cuda
-
-# With ABO manifest to carry product_type through to the split CSV
-python data/curate_platform.py \
-    --sources data/raw/abo/images/small data/raw/deepfashion2/train/image \
+    --sources data/raw/abo/images/small data/raw/deepfashion2/deepfashion2_original_images/train/image \
     --abo_manifest data/processed/abo_manifest.csv \
     --df2_manifest data/processed/deepfashion2_manifest.csv \
     --n_per_platform 400 \
-    --device cuda
+    --min_margin 0.05 \
+    --balance_categories \
+    --min_resolution 224 \
+    --device mps
 """
 
 from __future__ import annotations
@@ -55,26 +61,125 @@ from tqdm import tqdm
 # ---------------------------------------------------------------------------
 # Platform archetype prompts
 # ---------------------------------------------------------------------------
+# Prompts are designed for high cross-platform separation:
+#   - Shopify:  pristine studio / white-background commercial photography
+#   - Etsy:     tactile handmade/artisan aesthetic, warm naturalistic settings
+#   - eBay:     utilitarian resale-listing clarity, often on non-studio surfaces
+# Keeping the vocabularies deliberately non-overlapping improves CLIP
+# discrimination and reduces ambiguous ("low margin") assignments.
 
 PLATFORM_PROMPTS: dict[str, list[str]] = {
     "shopify": [
-        "product photo with clean white background, studio lighting, minimal props",
-        "e-commerce product image, high contrast, neutral background, sharp focus",
-        "commercial product photography, clean backdrop, professional lighting",
+        "professional product on pure white seamless background, perfect studio lighting, no shadows",
+        "luxury e-commerce product photo, high-key lighting, pristine white backdrop, commercial shoot",
+        "minimalist product photography, crisp edges, gradient white studio background, retail catalog",
     ],
     "etsy": [
-        "handmade product photo with warm lighting, natural textures, lifestyle props",
-        "artisanal product photography, cozy background, earthy tones, soft shadows",
-        "craft item photo, rustic background, warm color temperature, natural light",
+        "handmade artisan product on reclaimed wood surface, dried flowers, warm window light",
+        "handcrafted item styled with natural linen fabric, soft golden-hour lighting, cozy craft aesthetic",
+        "small-batch maker product, rustic vintage props, earthy warm tones, lifestyle flat-lay",
     ],
     "ebay": [
-        "product listing photo, bright even lighting, plain background, utilitarian clarity",
-        "used item photograph, straightforward lighting, neutral background, clear details",
-        "resale product photo, high clarity, minimal styling, white or grey background",
+        "second-hand item photographed on plain grey carpet, straightforward even lighting, no styling",
+        "used consumer electronics on a table, multiple angles, utilitarian clarity, resale listing photo",
+        "pre-owned product on neutral background, practical snapshot style, no decorative props",
     ],
 }
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+
+
+# ---------------------------------------------------------------------------
+# Quality pre-filter
+# ---------------------------------------------------------------------------
+
+def filter_by_resolution(paths: list[Path], min_size: int = 224) -> list[Path]:
+    """
+    Drop images that are too small, corrupt, or unreadable.
+
+    min_size applies to the shorter edge (both width and height must be >=
+    min_size).  The default of 224 px is the minimum required by ViT-based
+    CLIP models.
+    """
+    accepted: list[Path] = []
+    rejected = 0
+    for p in tqdm(paths, desc=f"Quality filter (min {min_size}px)", unit="img"):
+        try:
+            with Image.open(p) as img:
+                w, h = img.size
+            if min(w, h) >= min_size:
+                accepted.append(p)
+            else:
+                rejected += 1
+        except Exception:
+            rejected += 1
+    print(f"[quality] Kept {len(accepted):,} / {len(accepted) + rejected:,} images "
+          f"(dropped {rejected:,} below {min_size}px or corrupt)")
+    return accepted
+
+
+# ---------------------------------------------------------------------------
+# Category-balanced sampler
+# ---------------------------------------------------------------------------
+
+def sample_category_balanced(
+    indices: np.ndarray,
+    scores: np.ndarray,
+    paths: list[Path],
+    meta_df: pd.DataFrame,
+    n_total: int,
+) -> np.ndarray:
+    """
+    From the pool of *indices* assigned to a platform, select *n_total* images
+    while keeping category representation as balanced as possible.
+
+    Strategy:
+      1. Group indices by category (unknown images form their own group).
+      2. Sort each group by descending CLIP score (best-match first).
+      3. Round-robin across groups, taking one image at a time, until n_total
+         images are collected.  Groups that run out early are skipped.
+
+    This prevents one dominant category (e.g. "short sleeve top") from filling
+    an entire platform set, which would cause the adapter to conflate category
+    appearance with platform aesthetics.
+    """
+    from collections import defaultdict
+
+    path_strs = [str(paths[i]) for i in indices]
+    cat_series = (
+        meta_df.set_index("image_path")["category"]
+        .reindex(path_strs)
+        .fillna("unknown")
+    )
+
+    # Group indices by category, sorted by score descending within each group
+    groups: dict[str, list[int]] = defaultdict(list)
+    for i, (idx, cat) in enumerate(zip(indices, cat_series)):
+        groups[cat].append(idx)
+
+    for cat in groups:
+        cat_scores = scores[[i for i in groups[cat]]]
+        order = np.argsort(-cat_scores)
+        groups[cat] = [groups[cat][j] for j in order]
+
+    # Round-robin selection
+    selected: list[int] = []
+    group_iters = {cat: iter(idxs) for cat, idxs in groups.items()}
+    active_cats = list(group_iters.keys())
+
+    while len(selected) < n_total and active_cats:
+        exhausted = []
+        for cat in active_cats:
+            if len(selected) >= n_total:
+                break
+            try:
+                selected.append(next(group_iters[cat]))
+            except StopIteration:
+                exhausted.append(cat)
+        for cat in exhausted:
+            active_cats.remove(cat)
+
+    return np.array(selected)
 
 
 # ---------------------------------------------------------------------------
@@ -240,6 +345,9 @@ def curate(
     val_fraction: float,
     seed: int,
     embedding_cache: Path | None,
+    min_resolution: int = 0,
+    min_margin: float = 0.0,
+    balance_categories: bool = False,
 ) -> None:
     # ---- Gather all candidate images ----
     image_paths = collect_image_paths(sources)
@@ -247,6 +355,12 @@ def curate(
 
     if not image_paths:
         raise ValueError("No images found in the provided --sources directories.")
+
+    # ---- Quality pre-filter (optional) ----
+    if min_resolution > 0:
+        image_paths = filter_by_resolution(image_paths, min_size=min_resolution)
+        if not image_paths:
+            raise ValueError("No images survived the resolution filter.")
 
     # ---- CLIP embeddings ----
     model, preprocess, tokenizer = load_clip(device)
@@ -266,11 +380,24 @@ def curate(
 
     # ---- Score matrix: (n_images, n_platforms) ----
     scores = (image_feats @ archetype_feats.T)  # (N, 3)
+    scores_np = scores.numpy()
+
+    # ---- Soft assignment: drop low-margin (ambiguous) images ----
+    # An image is "confident" if its best-platform score exceeds the runner-up
+    # by at least min_margin.  Ambiguous images hurt platform set purity.
+    if min_margin > 0.0:
+        top2_vals = np.sort(scores_np, axis=1)[:, -2:]          # two highest
+        margin = top2_vals[:, 1] - top2_vals[:, 0]              # best − 2nd
+        confident = margin >= min_margin
+        n_dropped = int((~confident).sum())
+        print(f"[curate] Margin filter ({min_margin:.2f}): "
+              f"dropped {n_dropped:,} ambiguous images, "
+              f"kept {confident.sum():,}")
+        scores_np = scores_np[confident]
+        valid_paths = [p for p, c in zip(valid_paths, confident) if c]
 
     # ---- Hard assignment: each image → best-matching platform only ----
-    # This prevents the same image appearing in two platform sets.
-    best_platform_idx = scores.argmax(dim=1).numpy()  # (N,)
-    scores_np = scores.numpy()                         # (N, 3)
+    best_platform_idx = scores_np.argmax(axis=1)  # (N,)
 
     # ---- Load metadata manifests if provided ----
     abo_manifest  = pd.read_csv(abo_manifest_path)  if abo_manifest_path  and abo_manifest_path.exists()  else None
@@ -279,14 +406,24 @@ def curate(
 
     # ---- Per-platform selection and copy ----
     for p_idx, platform in enumerate(platforms):
-        # Images assigned to this platform, sorted by their score for this platform
         assigned_mask = best_platform_idx == p_idx
         assigned_indices = np.where(assigned_mask)[0]
 
-        # Sort by score descending and take top-N
-        assigned_scores = scores_np[assigned_indices, p_idx]
-        sorted_order = np.argsort(-assigned_scores)
-        top_indices = assigned_indices[sorted_order[:n_per_platform]]
+        if balance_categories and meta_df["category"].any():
+            # Category-balanced round-robin selection
+            top_indices = sample_category_balanced(
+                assigned_indices, scores_np[:, p_idx],
+                valid_paths, meta_df, n_per_platform,
+            )
+            print(f"[{platform}] Assigned {len(assigned_indices):,} images, "
+                  f"balanced-selected {len(top_indices)}  →  {output / platform}")
+        else:
+            # Plain top-K by CLIP score
+            assigned_scores = scores_np[assigned_indices, p_idx]
+            sorted_order = np.argsort(-assigned_scores)
+            top_indices = assigned_indices[sorted_order[:n_per_platform]]
+            print(f"[{platform}] Assigned {len(assigned_indices):,} images, "
+                  f"selected top {len(top_indices)}  →  {output / platform}")
 
         out_dir = output / platform
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -302,13 +439,7 @@ def curate(
                 shutil.copy2(src, dst)
             selected_paths.append(dst)
 
-        print(
-            f"[{platform}] Assigned {len(assigned_indices):,} images, "
-            f"selected top {len(top_indices)}  →  {out_dir}"
-        )
-
         # ---- Train / val split manifests ----
-        # Re-map selected paths back to their original source paths for metadata lookup
         source_selected = [valid_paths[i] for i in top_indices]
         write_split_manifests(
             source_selected, meta_df, platform, output, val_fraction, seed
@@ -364,6 +495,22 @@ def main() -> None:
         help="Path to save/load CLIP embedding cache (speeds up re-runs). "
              "Pass '' to disable caching."
     )
+    parser.add_argument(
+        "--min_resolution", type=int, default=224,
+        help="Minimum short-edge pixel size to accept an image (default: 224). "
+             "Set to 0 to disable the quality filter."
+    )
+    parser.add_argument(
+        "--min_margin", type=float, default=0.0,
+        help="Minimum gap between the top-1 and top-2 platform CLIP scores. "
+             "Images below this threshold are considered stylistically ambiguous "
+             "and dropped (e.g. 0.05).  Default 0.0 = no filtering."
+    )
+    parser.add_argument(
+        "--balance_categories", action="store_true", default=False,
+        help="If set, use round-robin category-balanced sampling within each "
+             "platform instead of plain top-K by CLIP score."
+    )
     args = parser.parse_args()
 
     cache = args.embedding_cache if str(args.embedding_cache) else None
@@ -378,6 +525,9 @@ def main() -> None:
         val_fraction=args.val_fraction,
         seed=args.seed,
         embedding_cache=cache,
+        min_resolution=args.min_resolution,
+        min_margin=args.min_margin,
+        balance_categories=args.balance_categories,
     )
 
 
