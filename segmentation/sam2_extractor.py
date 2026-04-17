@@ -25,8 +25,9 @@ import numpy as np
 from PIL import Image
 
 try:
-    from sam2.build_sam import build_sam2
-    from sam2.sam2_image_predictor import SAM2ImagePredictor
+    from segmentation_models.sam2.build_sam import build_sam2
+    #from segmentation_models.sam2.sam2_image_predictor import SAM2ImagePredictor
+    from segmentation_models.sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
     _SAM2_AVAILABLE = True
 except ImportError:
     _SAM2_AVAILABLE = False
@@ -49,13 +50,16 @@ class SAM2Extractor:
                 "segment-anything-2 not installed. Run: pip install segment-anything-2"
             )
         sam2_model = build_sam2(model_cfg, str(checkpoint), device=device)
-        self.predictor = SAM2ImagePredictor(sam2_model)
+        self.predictor = SAM2AutomaticMaskGenerator(sam2_model, points_per_side=16,min_mask_region_area=500,pred_iou_thresh=0.8,
+                                                    stability_score_thresh=0.95,
+                                                    
+                                                   )  
         self.device = device
 
     def extract(
         self,
         image: np.ndarray | Image.Image,
-        center_point: tuple[int, int] | None = None,
+        
     ) -> np.ndarray:
         """
         Extract a binary foreground mask.
@@ -76,22 +80,26 @@ class SAM2Extractor:
         if isinstance(image, Image.Image):
             image = np.array(image.convert("RGB"))
 
-        h, w = image.shape[:2]
-        if center_point is None:
-            center_point = (w // 2, h // 2)
+        
 
-        self.predictor.set_image(image)
-        point_coords = np.array([[center_point[0], center_point[1]]])
-        point_labels = np.array([1])  # foreground
+        mask=self.predictor.generate(image)
+        
+        if mask is None or len(mask) == 0:
+            return np.zeros(image.shape[:2], dtype=bool)
 
-        masks, scores, _ = self.predictor.predict(
-            point_coords=point_coords,
-            point_labels=point_labels,
-            multimask_output=True,
-        )
-        # Pick highest-scoring mask
-        best_idx = int(np.argmax(scores))
-        return masks[best_idx].astype(bool)
+        filtered = [m for m in mask if m['predicted_iou'] > 0.7]
+        if filtered is None or len(filtered) == 0:
+            scores=[i['predicted_iou'] for i in mask]
+            best_idx = int(np.argmax(scores))
+            return mask[best_idx]['segmentation'].astype(bool)
+        areas=[i['area'] for i in filtered]
+
+        best_idx = int(np.argmax(areas))
+        segment=filtered[best_idx]['segmentation'].astype(bool)
+
+        
+
+        return segment
 
     def extract_batch(
         self,
