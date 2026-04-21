@@ -210,3 +210,30 @@ Then revert smoke values and proceed to full Shopify run.
 - Category-stratified sampling using the `category` column
 - Inference / generation pipeline integration
 - Hyperparameter sweep runner
+
+---
+
+## Addendum — post-smoke findings (2026-04-21, commit `7ad5f7d`)
+
+The Phase E2 5-step smoke surfaced two MPS + SDXL incompatibilities not anticipated when this spec was written. The original design intent is preserved (manifest-driven splits, in-loop val, gradient checkpointing, no trackers); the only material deviations are precision and resolution.
+
+### What actually changed vs. spec
+
+| Decision | Spec | Reality | Why |
+|---|---|---|---|
+| `mixed_precision` | `fp16` | `"no"` (pure fp32) | MPS autocast for SDXL+IP-Adapter raised first an MPS NDArrayMatrixMultiplication assertion, then a `F.scaled_dot_product_attention` `query.dtype: float key.dtype: c10::Half` mismatch. fp16, bf16, and "no"+leftover hardcoded fp16 all failed. Pure fp32 throughout (frozen weights loaded via explicit `torch_dtype=torch.float32`) is the only stable path on Apple Silicon for this stack. |
+| `image_size` | `768` | `512` | Pure fp32 measured ~28 s per effective step at 768, projecting ~24 h per platform → 72 h total — over the 25 h budget agreed in §6. CLIP image encoder takes 336², so the per-platform aesthetic signal is unaffected; the diffusion path's quality loss at 512 vs 768 is small. New estimate: ~6 h per platform at 512. |
+| `_validate` log lines per smoke run | "exactly one" | "two identical" | The in-loop validate at the final step AND the post-loop validate both fire with the same `global_step` and the same model state (no training between them) — by design, both lines have identical loss because the deterministic seed is consistent. The "exactly one" wording in §6 Step B / acceptance criterion 2 is an oversight; "≥ 1" is correct. |
+| Cross-track impact | not anticipated | LoRA call site fixed | `adapters/lora/train.py` was using the old `ProductDataset(data_dir=...)` kwargs and would have TypeError'd. Updated minimally on this branch (`platform_dir=..., split="train"`) to keep LoRA importable. Adding LoRA val support is left to that track's owner. |
+
+### Acceptance criteria — revised
+
+1. `ProductDataset(platform_dir, split, image_size)` loads ≥ 200 train / ≥ 50 val per platform from manifest CSVs (any `image_size`; production runs use 512). ✓
+2. 5-step smoke training completes; `train.log` contains **at least one** line starting with `step=5 val_loss=`. ✓ (observed two identical lines)
+3. Full Shopify training run (3000 steps at 512 res) completes within **8 hours** (was 12 at 768), producing `checkpoints/ip_adapter/shopify/final/` plus intermediate checkpoints every 500 steps.
+4. Peak resident memory during training stays below 40 GB.
+
+### Notes for future work
+
+- If a future PyTorch / accelerate release fixes MPS autocast for SDXL, flipping `base.yaml` and the launcher back to `bf16` (and re-asserting on a fresh smoke) is the right move — the defensive `.to(query.dtype)` in `IPAttnProcessor2_0` already supports that path.
+- `pyproject.toml` has a broken `build-backend` (`setuptools.backends.legacy:build`); the `conftest.py` + launcher `PYTHONPATH=$PWD` are intentional workarounds. Fix that pyproject typo separately and the workarounds can be removed.
