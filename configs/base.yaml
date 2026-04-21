@@ -11,7 +11,7 @@ training:
   seed: 42
   mixed_precision: "fp16"          # bf16 on Ampere+
   gradient_checkpointing: true
-  dataloader_num_workers: 4
+  dataloader_num_workers: 0
   train_batch_size: 4
   gradient_accumulation_steps: 4   # effective batch = 16
   max_train_steps: 5000
@@ -36,7 +36,7 @@ noise:
 
 logging:
   project: "studio-diffusion"
-  report_to: "wandb"
+  report_to: null
 
 paths:
   output_dir: "checkpoints"
