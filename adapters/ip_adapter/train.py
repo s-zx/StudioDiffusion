@@ -72,7 +72,7 @@ class ProductDataset(Dataset):
                 f"Expected layout: data/platform_sets/manifests/<platform>_<split>.csv"
             )
 
-        with open(manifest_csv, newline="") as f:
+        with open(manifest_csv, newline="", encoding="utf-8") as f:
             rows = list(csv.DictReader(f))
         if not rows:
             raise ValueError(f"Manifest is empty (header only): {manifest_csv}")
@@ -115,7 +115,7 @@ class ProductDataset(Dataset):
         self.captions: dict[str, str] = {}
         if caption_dir.exists():
             for txt in caption_dir.glob("*.txt"):
-                self.captions[txt.stem] = txt.read_text().strip()
+                self.captions[txt.stem] = txt.read_text(encoding="utf-8").strip()
 
         # Transforms — diffusion branch (image_size×image_size) and CLIP branch (336×336)
         self.transform = transforms.Compose([
