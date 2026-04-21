@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import csv
 import math
+import time
 from pathlib import Path
 
 import torch
@@ -153,6 +154,99 @@ class ProductDataset(Dataset):
 # Training
 # ---------------------------------------------------------------------------
 
+@torch.no_grad()
+def _validate(
+    adapter,
+    val_loader,
+    vae,
+    text_encoder_1,
+    text_encoder_2,
+    tokenizer_1,
+    tokenizer_2,
+    noise_scheduler,
+    accelerator,
+    cfg,
+    global_step: int,
+    log_path: Path,
+) -> float:
+    """Run one full pass over the val loader and log mean MSE.
+
+    Uses a fresh torch.Generator seeded with cfg.training.seed every call,
+    so noise + timestep sequences are identical across validation runs and
+    val/loss curves are directly comparable across training steps.
+    """
+    adapter.eval()
+    try:
+        gen = torch.Generator(device=accelerator.device).manual_seed(cfg.training.seed)
+        total_loss = 0.0
+        n_batches = 0
+        wall_start = time.time()
+
+        for batch in val_loader:
+            pixel_values = batch["pixel_values"].to(accelerator.device, dtype=torch.float16)
+            clip_pixel_values = batch["clip_pixel_values"].to(accelerator.device, dtype=torch.float32)
+
+            latents = vae.encode(pixel_values).latent_dist.sample(generator=gen)
+            latents = latents * vae.config.scaling_factor
+
+            noise = torch.randn(
+                latents.shape, generator=gen,
+                device=accelerator.device, dtype=latents.dtype,
+            )
+            bsz = latents.shape[0]
+            timesteps = torch.randint(
+                0, noise_scheduler.config.num_train_timesteps,
+                (bsz,), generator=gen, device=accelerator.device,
+            ).long()
+            noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
+
+            tokens_1 = tokenizer_1(
+                batch["caption"], padding="max_length",
+                max_length=tokenizer_1.model_max_length, truncation=True, return_tensors="pt",
+            ).input_ids.to(accelerator.device)
+            tokens_2 = tokenizer_2(
+                batch["caption"], padding="max_length",
+                max_length=tokenizer_2.model_max_length, truncation=True, return_tensors="pt",
+            ).input_ids.to(accelerator.device)
+
+            enc1_out = text_encoder_1(tokens_1, output_hidden_states=True)
+            enc2_out = text_encoder_2(tokens_2, output_hidden_states=True)
+            text_embeds = torch.cat(
+                [enc1_out.hidden_states[-2], enc2_out.hidden_states[-2]], dim=-1,
+            )
+            pooled_text_embeds = enc2_out[0]
+            add_time_ids = torch.tensor(
+                [[cfg.data.image_size, cfg.data.image_size, 0, 0,
+                  cfg.data.image_size, cfg.data.image_size]] * bsz,
+                dtype=torch.float32, device=accelerator.device,
+            )
+
+            image_prompt_embeds, _ = accelerator.unwrap_model(adapter).encode_image(
+                clip_pixel_values
+            )
+            noise_pred = accelerator.unwrap_model(adapter).unet(
+                noisy_latents, timesteps,
+                encoder_hidden_states=text_embeds,
+                added_cond_kwargs={"text_embeds": pooled_text_embeds, "time_ids": add_time_ids},
+                cross_attention_kwargs={"ip_hidden_states": image_prompt_embeds},
+            ).sample
+
+            loss = F.mse_loss(noise_pred.float(), noise.float(), reduction="mean")
+            total_loss += loss.item()
+            n_batches += 1
+
+        mean_loss = total_loss / max(n_batches, 1)
+        wall = time.time() - wall_start
+        line = f"step={global_step} val_loss={mean_loss:.6f} wall={wall:.1f}s n={n_batches}"
+        print(f"[validate] {line}")
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+        return mean_loss
+    finally:
+        adapter.train()
+
+
 def train(cfg_path: str) -> None:
     base_cfg = OmegaConf.load("configs/base.yaml")
     platform_cfg = OmegaConf.load(cfg_path)
@@ -195,16 +289,24 @@ def train(cfg_path: str) -> None:
         eps=cfg.optimizer.epsilon,
     )
 
-    dataset = ProductDataset(
-        data_dir=Path(cfg.data.platform_dir),
-        image_size=cfg.data.image_size,
-    )
+    platform_dir = Path(cfg.data.platform_dir)
+    train_dataset = ProductDataset(platform_dir, split="train", image_size=cfg.data.image_size)
+    val_dataset = ProductDataset(platform_dir, split="val", image_size=cfg.data.image_size)
+    print(f"[data] {platform_dir.name}: train={len(train_dataset)} val={len(val_dataset)}")
+
     dataloader = DataLoader(
-        dataset,
+        train_dataset,
         batch_size=cfg.training.train_batch_size,
         shuffle=True,
         num_workers=cfg.training.dataloader_num_workers,
         pin_memory=False,  # MPS does not support pinned memory
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=cfg.training.train_batch_size,
+        shuffle=False,
+        num_workers=0,            # val pass is short — no workers needed
+        pin_memory=False,
     )
 
     num_epochs = math.ceil(
@@ -217,9 +319,10 @@ def train(cfg_path: str) -> None:
         eta_min=0,
     )
 
-    adapter, optimizer, dataloader, lr_scheduler = accelerator.prepare(
-        adapter, optimizer, dataloader, lr_scheduler
+    adapter, optimizer, dataloader, lr_scheduler, val_loader = accelerator.prepare(
+        adapter, optimizer, dataloader, lr_scheduler, val_loader
     )
+    train_log = output_dir / "train.log"
     vae = vae.to(accelerator.device, dtype=torch.float16)
     text_encoder_1 = text_encoder_1.to(accelerator.device)
     text_encoder_2 = text_encoder_2.to(accelerator.device)
@@ -305,11 +408,23 @@ def train(cfg_path: str) -> None:
                         ckpt_dir = output_dir / f"checkpoint-{global_step}"
                         accelerator.unwrap_model(adapter).save_pretrained(ckpt_dir)
 
+                if global_step % cfg.training.validation_steps == 0:
+                    _validate(
+                        adapter, val_loader, vae,
+                        text_encoder_1, text_encoder_2, tokenizer_1, tokenizer_2,
+                        noise_scheduler, accelerator, cfg, global_step, train_log,
+                    )
+
                 if global_step >= cfg.training.max_train_steps:
                     break
 
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
+        _validate(
+            adapter, val_loader, vae,
+            text_encoder_1, text_encoder_2, tokenizer_1, tokenizer_2,
+            noise_scheduler, accelerator, cfg, global_step, train_log,
+        )
         accelerator.unwrap_model(adapter).save_pretrained(output_dir / "final")
     accelerator.end_training()
 
