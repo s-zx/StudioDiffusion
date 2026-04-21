@@ -77,3 +77,40 @@ def test_all_resolved_paths_exist(shopify_train, shopify_val):
     for ds in (shopify_train, shopify_val):
         for item in ds.items:
             assert item["path"].exists(), f"missing on disk: {item['path']}"
+
+
+def test_invalid_split_raises():
+    with pytest.raises(ValueError, match="split must be"):
+        ProductDataset(PLATFORM_DIR, split="test", image_size=IMAGE_SIZE)
+
+
+def test_missing_manifest_raises(tmp_path):
+    fake_platform = tmp_path / "fake_platform"
+    fake_platform.mkdir()
+    (tmp_path / "manifests").mkdir()
+    # train CSV deliberately not created
+    with pytest.raises(FileNotFoundError, match="Manifest CSV not found"):
+        ProductDataset(fake_platform, split="train", image_size=IMAGE_SIZE)
+
+
+def test_empty_manifest_raises(tmp_path):
+    platform_dir = tmp_path / "fake_platform"
+    platform_dir.mkdir()
+    manifests = tmp_path / "manifests"
+    manifests.mkdir()
+    (manifests / "fake_platform_train.csv").write_text("image_path,category\n")
+    with pytest.raises(ValueError, match="Manifest is empty"):
+        ProductDataset(platform_dir, split="train", image_size=IMAGE_SIZE)
+
+
+def test_excessive_misses_raises(tmp_path):
+    platform_dir = tmp_path / "fake_platform"
+    platform_dir.mkdir()
+    manifests = tmp_path / "manifests"
+    manifests.mkdir()
+    rows = ["image_path,category"]
+    for i in range(20):
+        rows.append(f"/nonexistent/x/y_{i}.jpg,FAKE")
+    (manifests / "fake_platform_train.csv").write_text("\n".join(rows) + "\n")
+    with pytest.raises(RuntimeError, match="More than 5%"):
+        ProductDataset(platform_dir, split="train", image_size=IMAGE_SIZE)
