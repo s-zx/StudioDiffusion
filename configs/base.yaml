@@ -9,7 +9,7 @@ model:
 
 training:
   seed: 42
-  mixed_precision: "fp16"          # bf16 on Ampere+
+  mixed_precision: "fp16"          # MPS-safe; bf16 unreliable on Apple Silicon
   gradient_checkpointing: true
   dataloader_num_workers: 0
   train_batch_size: 4
