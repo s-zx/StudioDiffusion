@@ -9,7 +9,7 @@ model:
 
 training:
   seed: 42
-  mixed_precision: "fp16"          # MPS-safe; bf16 unreliable on Apple Silicon
+  mixed_precision: "no"            # MPS autocast is broken for SDXL+IP-Adapter (Q stays fp32 while K/V get cast to fp16 in cross-attn); pure fp32 is the only stable option on Apple Silicon for this stack
   gradient_checkpointing: true
   dataloader_num_workers: 0
   train_batch_size: 4

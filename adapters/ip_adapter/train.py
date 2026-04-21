@@ -183,7 +183,7 @@ def _validate(
         wall_start = time.time()
 
         for batch in val_loader:
-            pixel_values = batch["pixel_values"].to(accelerator.device, dtype=torch.float16)
+            pixel_values = batch["pixel_values"].to(accelerator.device)
             clip_pixel_values = batch["clip_pixel_values"].to(accelerator.device, dtype=torch.float32)
 
             latents = vae.encode(pixel_values).latent_dist.sample(generator=gen)
@@ -264,12 +264,15 @@ def train(cfg_path: str) -> None:
     )
 
     # ---- Models ----
+    # Force fp32 explicitly — some SDXL weight files default to fp16 storage
+    # (e.g. text_encoder_2 as `*.fp16.safetensors`, madebyollin VAE is fp16-first),
+    # which mixes dtypes in cross-attention on MPS and raises at SDPA.
     tokenizer_1 = CLIPTokenizer.from_pretrained(cfg.model.base, subfolder="tokenizer")
     tokenizer_2 = CLIPTokenizer.from_pretrained(cfg.model.base, subfolder="tokenizer_2")
-    text_encoder_1 = CLIPTextModel.from_pretrained(cfg.model.base, subfolder="text_encoder")
-    text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(cfg.model.base, subfolder="text_encoder_2")
-    vae = AutoencoderKL.from_pretrained(cfg.model.vae)
-    unet = UNet2DConditionModel.from_pretrained(cfg.model.base, subfolder="unet")
+    text_encoder_1 = CLIPTextModel.from_pretrained(cfg.model.base, subfolder="text_encoder", torch_dtype=torch.float32)
+    text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(cfg.model.base, subfolder="text_encoder_2", torch_dtype=torch.float32)
+    vae = AutoencoderKL.from_pretrained(cfg.model.vae, torch_dtype=torch.float32)
+    unet = UNet2DConditionModel.from_pretrained(cfg.model.base, subfolder="unet", torch_dtype=torch.float32)
     noise_scheduler = DDPMScheduler.from_pretrained(cfg.model.base, subfolder="scheduler")
 
     adapter = IPAdapterSDXL(
@@ -330,7 +333,7 @@ def train(cfg_path: str) -> None:
         adapter, optimizer, dataloader, lr_scheduler, val_loader
     )
     train_log = output_dir / "train.log"
-    vae = vae.to(accelerator.device, dtype=torch.float16)
+    vae = vae.to(accelerator.device)
     text_encoder_1 = text_encoder_1.to(accelerator.device)
     text_encoder_2 = text_encoder_2.to(accelerator.device)
 
@@ -341,7 +344,7 @@ def train(cfg_path: str) -> None:
         adapter.train()
         for batch in dataloader:
             with accelerator.accumulate(adapter):
-                pixel_values = batch["pixel_values"].to(accelerator.device, dtype=torch.float16)
+                pixel_values = batch["pixel_values"].to(accelerator.device)
                 # CLIP encoder expects fp32; keep on same device
                 clip_pixel_values = batch["clip_pixel_values"].to(accelerator.device, dtype=torch.float32)
 

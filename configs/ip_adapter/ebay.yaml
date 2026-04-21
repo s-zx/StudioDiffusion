@@ -10,7 +10,7 @@ description: >
 
 data:
   platform_dir: "data/platform_sets/ebay"
-  image_size: 768
+  image_size: 512
   center_crop: true
 
 ip_adapter:
