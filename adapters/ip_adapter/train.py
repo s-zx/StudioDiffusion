@@ -16,6 +16,7 @@ python adapters/ip_adapter/train.py \
 from __future__ import annotations
 
 import argparse
+import csv
 import math
 from pathlib import Path
 
@@ -43,28 +44,86 @@ from adapters.ip_adapter.model import IPAdapterSDXL
 # ---------------------------------------------------------------------------
 
 class ProductDataset(Dataset):
-    """Simple dataset: loads (image, caption, mask) triples from a directory."""
+    """Manifest-driven product image dataset for IP-Adapter training.
 
-    IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+    Reads ``data/platform_sets/manifests/<platform>_<split>.csv`` and resolves
+    each row's ``image_path`` to a local file under ``<platform_dir>/``, using
+    the same naming rule that ``data/curate_platform.py`` writes
+    (``<parent>_<basename>`` on collision, plain ``<basename>`` otherwise).
 
-    def __init__(self, data_dir: Path, image_size: int = 1024) -> None:
-        self.data_dir = data_dir
-        self.image_paths = sorted(
-            p for p in data_dir.rglob("*") if p.suffix.lower() in self.IMAGE_EXTS
+    Captions are looked up at ``data/processed/captions/<platform>/<stem>.txt``
+    if present; otherwise fall back to ``"a product photo"``.
+    """
+
+    def __init__(self, platform_dir: Path, split: str, image_size: int = 768) -> None:
+        if split not in ("train", "val"):
+            raise ValueError(f"split must be 'train' or 'val', got {split!r}")
+
+        self.platform_dir = Path(platform_dir)
+        self.split = split
+        self.image_size = image_size
+
+        manifest_csv = (
+            self.platform_dir.parent / "manifests" / f"{self.platform_dir.name}_{split}.csv"
         )
-        caption_dir = Path("data/processed/captions") / data_dir.name
+        if not manifest_csv.exists():
+            raise FileNotFoundError(
+                f"Manifest CSV not found: {manifest_csv}\n"
+                f"Expected layout: data/platform_sets/manifests/<platform>_<split>.csv"
+            )
+
+        with open(manifest_csv, newline="") as f:
+            rows = list(csv.DictReader(f))
+        if not rows:
+            raise ValueError(f"Manifest is empty (header only): {manifest_csv}")
+
+        self.items: list[dict] = []
+        unresolved: list[str] = []
+        for row in rows:
+            src = Path(row["image_path"])
+            primary = self.platform_dir / f"{src.parent.name}_{src.name}"
+            secondary = self.platform_dir / src.name
+            if primary.exists():
+                resolved = primary
+            elif secondary.exists():
+                resolved = secondary
+            else:
+                unresolved.append(row["image_path"])
+                continue
+            self.items.append({
+                "path": resolved,
+                "category": (row.get("category") or "").strip(),
+            })
+
+        miss_rate = len(unresolved) / len(rows)
+        if miss_rate > 0.05:
+            sample = "\n  ".join(unresolved[:5])
+            raise RuntimeError(
+                f"More than 5% of manifest rows could not be resolved to disk "
+                f"({len(unresolved)}/{len(rows)} = {miss_rate:.1%}). "
+                f"Bundle and manifest may be from different curate runs.\n"
+                f"Sample unresolved paths:\n  {sample}"
+            )
+        if unresolved:
+            print(
+                f"[ProductDataset] {self.platform_dir.name}/{split}: "
+                f"skipped {len(unresolved)} unresolved rows ({miss_rate:.1%})"
+            )
+
+        # Captions (optional)
+        caption_dir = Path("data/processed/captions") / self.platform_dir.name
         self.captions: dict[str, str] = {}
         if caption_dir.exists():
             for txt in caption_dir.glob("*.txt"):
                 self.captions[txt.stem] = txt.read_text().strip()
 
+        # Transforms — diffusion branch (image_size×image_size) and CLIP branch (336×336)
         self.transform = transforms.Compose([
             transforms.Resize(image_size, interpolation=transforms.InterpolationMode.LANCZOS),
             transforms.CenterCrop(image_size),
             transforms.ToTensor(),
             transforms.Normalize([0.5], [0.5]),
         ])
-        # CLIP ViT-L/14-336 expects 336×336 with its own normalization stats
         self.clip_transform = transforms.Compose([
             transforms.Resize(336, interpolation=transforms.InterpolationMode.BICUBIC),
             transforms.CenterCrop(336),
@@ -76,13 +135,13 @@ class ProductDataset(Dataset):
         ])
 
     def __len__(self) -> int:
-        return len(self.image_paths)
+        return len(self.items)
 
     def __getitem__(self, idx: int) -> dict:
         from PIL import Image
-        path = self.image_paths[idx]
-        image = Image.open(path).convert("RGB")
-        caption = self.captions.get(path.stem, "a product photo")
+        item = self.items[idx]
+        image = Image.open(item["path"]).convert("RGB")
+        caption = self.captions.get(item["path"].stem, "a product photo")
         return {
             "pixel_values": self.transform(image),
             "clip_pixel_values": self.clip_transform(image),
