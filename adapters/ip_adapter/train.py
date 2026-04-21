@@ -253,6 +253,8 @@ def train(cfg_path: str) -> None:
     cfg = OmegaConf.merge(base_cfg, platform_cfg)
 
     output_dir = Path(cfg.paths.output_dir) / "ip_adapter" / cfg.platform
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "train.log").touch(exist_ok=True)
     proj_cfg = ProjectConfiguration(project_dir=str(output_dir), logging_dir=str(output_dir / "logs"))
     accelerator = Accelerator(
         gradient_accumulation_steps=cfg.training.gradient_accumulation_steps,
@@ -276,6 +278,11 @@ def train(cfg_path: str) -> None:
         num_tokens=cfg.ip_adapter.num_tokens,
         adapter_scale=cfg.ip_adapter.adapter_scale,
     )
+
+    if cfg.training.gradient_checkpointing:
+        # Enable on the unet AFTER IPAdapterSDXL has injected its IP cross-attn
+        # processors so they're also covered by checkpointing.
+        adapter.unet.enable_gradient_checkpointing()
 
     for m in [vae, text_encoder_1, text_encoder_2]:
         m.requires_grad_(False)
