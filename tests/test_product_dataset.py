@@ -41,3 +41,39 @@ def test_item_shape_and_keys(shopify_train):
     assert item["pixel_values"].shape == (3, IMAGE_SIZE, IMAGE_SIZE)
     assert item["clip_pixel_values"].shape == (3, 336, 336)
     assert isinstance(item["caption"], str) and len(item["caption"]) > 0
+
+
+def test_resolves_primary_form(shopify_train):
+    """At least one item should resolve via the <parent>_<basename> form
+    (e.g. '08_08dcf907.jpg', 'shard_00004_000476.jpg')."""
+    assert any("_" in it["path"].name for it in shopify_train.items), \
+        "expected at least one primary-form (<parent>_<basename>) resolution"
+
+
+def test_resolves_secondary_form(tmp_path):
+    """Secondary (plain basename) resolution works when the primary form
+    does not exist on disk — verified with a synthetic fixture."""
+    platform_dir = tmp_path / "fake_platform"
+    platform_dir.mkdir()
+    manifests = tmp_path / "manifests"
+    manifests.mkdir()
+
+    # Create only the secondary (plain basename) form, not the primary form.
+    img_file = platform_dir / "abc123.jpg"
+    img_file.write_bytes(b"")  # empty placeholder
+
+    (manifests / "fake_platform_train.csv").write_text(
+        "image_path,category\n"
+        "/some/parent/abc123.jpg,WIDGET\n"
+    )
+
+    ds = ProductDataset(platform_dir, split="train", image_size=IMAGE_SIZE)
+    assert len(ds) == 1
+    assert ds.items[0]["path"] == img_file
+    assert "_" not in ds.items[0]["path"].name
+
+
+def test_all_resolved_paths_exist(shopify_train, shopify_val):
+    for ds in (shopify_train, shopify_val):
+        for item in ds.items:
+            assert item["path"].exists(), f"missing on disk: {item['path']}"
