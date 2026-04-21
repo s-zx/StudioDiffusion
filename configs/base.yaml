@@ -9,9 +9,9 @@ model:
 
 training:
   seed: 42
-  mixed_precision: "fp16"          # bf16 on Ampere+
+  mixed_precision: "no"            # MPS autocast is broken for SDXL+IP-Adapter (Q stays fp32 while K/V get cast to fp16 in cross-attn); pure fp32 is the only stable option on Apple Silicon for this stack
   gradient_checkpointing: true
-  dataloader_num_workers: 4
+  dataloader_num_workers: 0
   train_batch_size: 4
   gradient_accumulation_steps: 4   # effective batch = 16
   max_train_steps: 5000
@@ -36,7 +36,7 @@ noise:
 
 logging:
   project: "studio-diffusion"
-  report_to: "wandb"
+  report_to: null
 
 paths:
   output_dir: "checkpoints"

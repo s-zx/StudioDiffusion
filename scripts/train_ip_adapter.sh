@@ -18,9 +18,13 @@ fi
 
 echo "=== Training IP-Adapter for platform: $PLATFORM ==="
 
-# MPS fallback needed for a small number of ops not yet supported on Apple Silicon
-PYTORCH_ENABLE_MPS_FALLBACK=1 accelerate launch \
-  --mixed_precision bf16 \
+# PYTHONPATH puts the repo root on sys.path so `from adapters.ip_adapter.model import ...`
+# in train.py resolves. (pip install -e . is broken by the pyproject.toml build-backend
+# typo, and accelerate launch passes the script as a path, which only adds the script's
+# own directory to sys.path — not the repo root.)
+# MPS fallback handles a small number of ops not yet implemented on Apple Silicon.
+PYTHONPATH="${PWD}:${PYTHONPATH:-}" PYTORCH_ENABLE_MPS_FALLBACK=1 accelerate launch \
+  --mixed_precision no \
   --num_processes 1 \
   adapters/ip_adapter/train.py \
   --config "$CONFIG"

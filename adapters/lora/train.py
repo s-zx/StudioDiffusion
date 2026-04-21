@@ -74,8 +74,12 @@ def train(cfg_path: str) -> None:
         eps=cfg.optimizer.epsilon,
     )
 
+    # NOTE: ProductDataset became manifest-driven and now requires a split kwarg
+    # (Phase B of the IP-Adapter rewrite). LoRA currently uses only the train
+    # split; if/when LoRA wants val loss, build a second instance with split="val".
     dataset = ProductDataset(
-        data_dir=Path(cfg.data.platform_dir),
+        platform_dir=Path(cfg.data.platform_dir),
+        split="train",
         image_size=cfg.data.image_size,
     )
     dataloader = DataLoader(

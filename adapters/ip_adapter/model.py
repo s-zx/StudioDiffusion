@@ -136,8 +136,8 @@ class IPAttnProcessor2_0(nn.Module):
 
         # IP-Adapter image cross-attention — only when embeddings are provided
         if ip_hidden_states is not None:
-            ip_key   = self.to_k_ip(ip_hidden_states)
-            ip_value = self.to_v_ip(ip_hidden_states)
+            ip_key   = self.to_k_ip(ip_hidden_states).to(query.dtype)
+            ip_value = self.to_v_ip(ip_hidden_states).to(query.dtype)
             ip_key   = ip_key.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
             ip_value = ip_value.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
             ip_out = F.scaled_dot_product_attention(
@@ -181,7 +181,9 @@ class IPAdapterSDXL(nn.Module):
         self.adapter_scale = adapter_scale
         self.num_tokens = num_tokens
 
-        self.image_encoder = CLIPVisionModelWithProjection.from_pretrained(image_encoder_id)
+        self.image_encoder = CLIPVisionModelWithProjection.from_pretrained(
+            image_encoder_id, torch_dtype=torch.float32,
+        )
         self.feature_extractor = CLIPImageProcessor.from_pretrained(image_encoder_id)
 
         clip_embed_dim = self.image_encoder.config.projection_dim
