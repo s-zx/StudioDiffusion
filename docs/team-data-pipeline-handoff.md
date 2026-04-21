@@ -4,6 +4,8 @@ This document records **data-related deliverables** implemented in this repo so 
 
 For a **short narrative overview** of the same work (motivation, datasets, outcomes, caveats—no runbook), see `docs/data-work-summary.md`.
 
+For **teammate onboarding** (fresh machine, step-by-step commands, disk notes, share-data vs run-scripts), see `docs/data-setup.md`.
+
 ---
 
 ## Ticket coverage (high level)

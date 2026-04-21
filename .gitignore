@@ -36,6 +36,9 @@ wandb/
 *.pth
 *.h5
 
+# Local teammate data bundles (large; regenerate with share/pack_data_bundle.sh)
+share/*.tar.gz
+
 # AWS credentials / keys
 .env
 *.env

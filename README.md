@@ -51,6 +51,8 @@ StudioDiffusion/
 │   ├── base.yaml
 │   ├── ip_adapter/             # Per-platform IP-Adapter configs
 │   └── lora/                   # Per-platform LoRA configs
+├── docs/                       # Data setup guide, handoff, work summary
+├── share/                      # Teammate bundle README + pack_data_bundle.sh (see share/README.md)
 ├── data/                       # Dataset download & curation scripts
 │   ├── download_abo.sh
 │   ├── download_deepfashion2.sh
@@ -99,7 +101,8 @@ StudioDiffusion/
 | [LAION-Aesthetics](https://laion.ai/blog/laion-aesthetics/) | Filtered LAION-5B | CC BY 4.0 | Aesthetic benchmark |
 | Platform-curated sets | 200–500 imgs / platform | Derived | Adapter training data |
 
-See `data/` for download and curation scripts.
+**Full data setup (venv, ABO, DeepFashion2, LAION, platform curation, disk notes, “share data vs run scripts”):** see **[`docs/data-setup.md`](docs/data-setup.md)**.  
+Operational detail: [`docs/team-data-pipeline-handoff.md`](docs/team-data-pipeline-handoff.md). Short overview: [`docs/data-work-summary.md`](docs/data-work-summary.md).
 
 ---
 
@@ -117,13 +120,14 @@ See `data/` for download and curation scripts.
 ## Setup
 
 ```bash
-git clone https://github.com/<your-org>/StudioDiffusion.git
+git clone https://github.com/s-zx/StudioDiffusion.git
 cd StudioDiffusion
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
+python3.11 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+pip install -e ".[dev]"   # optional
 ```
 
-Download datasets (see `data/` scripts), then:
+**Prepare data** before training: follow **[`docs/data-setup.md`](docs/data-setup.md)** end-to-end (ABO → DeepFashion2 → LAION subset → `curate_platform.py`). Then:
 
 ```bash
 # Train IP-Adapter for Shopify
@@ -135,29 +139,3 @@ bash scripts/train_lora.sh etsy
 # Run full evaluation
 bash scripts/run_eval.sh
 ```
-
----
-
-## References
-
-1. Ravi et al. (2024). *SAM 2: Segment Anything in Images and Videos.* arXiv:2408.00714
-2. Qin et al. (2020). *U²-Net: Going Deeper with Nested U-Structure.* PR.
-3. Podell et al. (2023). *SDXL: Improving Latent Diffusion Models for High-Resolution Image Synthesis.* arXiv:2307.01952
-4. Zhang & Agrawala (2023). *Adding Conditional Control to Text-to-Image Diffusion Models.* ICCV 2023.
-5. Ye et al. (2023). *IP-Adapter: Text Compatible Image Prompt Adapter for Text-to-Image Diffusion Models.* arXiv:2308.06721
-6. Hu et al. (2022). *LoRA: Low-Rank Adaptation of Large Language Models.* ICLR 2022.
-7. Liu et al. (2025). *ICAS: Image Conditioned Aesthetic Style Transfer.*
-8. Radford et al. (2021). *Learning Transferable Visual Models From Natural Language Supervision.* ICML 2021.
-9. Schuhmann et al. (2022). *LAION-5B: An open large-scale dataset for training next generation image-text models.* NeurIPS 2022.
-
----
-
-## Team
-
-| Name | Modules |
-|------|---------|
-| TBD | Segmentation (SAM2 + U²Net evaluation) |
-| TBD | Adapter training (IP-Adapter) |
-| TBD | Adapter training (LoRA) |
-| TBD | Evaluation suite |
-| TBD | Data curation pipeline |

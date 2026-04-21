@@ -64,6 +64,16 @@ class ProductDataset(Dataset):
             transforms.ToTensor(),
             transforms.Normalize([0.5], [0.5]),
         ])
+        # CLIP ViT-L/14-336 expects 336×336 with its own normalization stats
+        self.clip_transform = transforms.Compose([
+            transforms.Resize(336, interpolation=transforms.InterpolationMode.BICUBIC),
+            transforms.CenterCrop(336),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=[0.48145466, 0.4578275, 0.40821073],
+                std=[0.26862954, 0.26130258, 0.27577711],
+            ),
+        ])
 
     def __len__(self) -> int:
         return len(self.image_paths)
@@ -73,7 +83,11 @@ class ProductDataset(Dataset):
         path = self.image_paths[idx]
         image = Image.open(path).convert("RGB")
         caption = self.captions.get(path.stem, "a product photo")
-        return {"pixel_values": self.transform(image), "caption": caption}
+        return {
+            "pixel_values": self.transform(image),
+            "clip_pixel_values": self.clip_transform(image),
+            "caption": caption,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -131,7 +145,7 @@ def train(cfg_path: str) -> None:
         batch_size=cfg.training.train_batch_size,
         shuffle=True,
         num_workers=cfg.training.dataloader_num_workers,
-        pin_memory=True,
+        pin_memory=False,  # MPS does not support pinned memory
     )
 
     num_epochs = math.ceil(
@@ -159,6 +173,8 @@ def train(cfg_path: str) -> None:
         for batch in dataloader:
             with accelerator.accumulate(adapter):
                 pixel_values = batch["pixel_values"].to(accelerator.device, dtype=torch.float16)
+                # CLIP encoder expects fp32; keep on same device
+                clip_pixel_values = batch["clip_pixel_values"].to(accelerator.device, dtype=torch.float32)
 
                 # Encode images to latent space
                 latents = vae.encode(pixel_values).latent_dist.sample()
@@ -195,12 +211,20 @@ def train(cfg_path: str) -> None:
                     dtype=torch.float32, device=accelerator.device
                 )
 
+                # Image conditioning — project CLIP embeddings to IP-Adapter tokens
+                # CLIP encoder is frozen (no_grad inside encode_image);
+                # image_proj_model is trainable and participates in the graph.
+                image_prompt_embeds, _ = accelerator.unwrap_model(adapter).encode_image(
+                    clip_pixel_values
+                )
+
                 # Predict noise
                 noise_pred = accelerator.unwrap_model(adapter).unet(
                     noisy_latents,
                     timesteps,
                     encoder_hidden_states=text_embeds,
                     added_cond_kwargs={"text_embeds": pooled_text_embeds, "time_ids": add_time_ids},
+                    cross_attention_kwargs={"ip_hidden_states": image_prompt_embeds},
                 ).sample
 
                 loss = F.mse_loss(noise_pred.float(), noise.float(), reduction="mean")

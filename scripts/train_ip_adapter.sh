@@ -18,8 +18,9 @@ fi
 
 echo "=== Training IP-Adapter for platform: $PLATFORM ==="
 
-accelerate launch \
-  --mixed_precision fp16 \
+# MPS fallback needed for a small number of ops not yet supported on Apple Silicon
+PYTORCH_ENABLE_MPS_FALLBACK=1 accelerate launch \
+  --mixed_precision bf16 \
   --num_processes 1 \
   adapters/ip_adapter/train.py \
   --config "$CONFIG"
