@@ -60,3 +60,6 @@ logs/
 
 # Evaluation artifacts
 results/
+
+# Personal workflow artifacts (superpowers specs / plans) — local only
+docs/superpowers/
