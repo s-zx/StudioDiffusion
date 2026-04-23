@@ -1,0 +1,51 @@
+defaults:
+  - base
+
+# ── Smoke-test override of configs/lora/etsy.yaml ──
+# Tiny run to verify the training loop end-to-end before burning real GPU time.
+#   - 5 steps, batch 1, 256px → ~30s on a real GPU, runnable on Mac MPS in minutes.
+
+platform: etsy
+adapter_type: lora
+
+description: >
+  SMOKE-TEST LoRA config. Not for real training. Use configs/lora/etsy.yaml.
+
+data:
+  platform_dir: "data/platform_sets/etsy"
+  train_split: 0.8
+  image_size: 256
+  center_crop: true
+  prompt_template: "a product photo, etsy style, warm lifestyle aesthetic"
+
+lora:
+  rank: 4
+  alpha: 4
+  dropout: 0.0
+  target_modules:
+    - "to_q"
+    - "to_k"
+    - "to_v"
+    - "to_out.0"
+    - "add_q_proj"
+    - "add_k_proj"
+    - "add_v_proj"
+    - "to_add_out"
+
+training:
+  max_train_steps: 5
+  learning_rate: 1.0e-4
+  train_batch_size: 1
+  gradient_accumulation_steps: 1
+  checkpointing_steps: 1000      # don't checkpoint during smoke
+  mixed_precision: "no"          # MPS doesn't fully support fp16 autocast
+  dataloader_num_workers: 0      # avoid worker overhead on a tiny run
+
+# disable wandb for smoke test
+logging:
+  report_to: null
+  project: "studio-diffusion-smoke"
+
+# disable min-SNR for fastest path
+noise:
+  snr_gamma: 0

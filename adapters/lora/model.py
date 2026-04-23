@@ -1,95 +1,305 @@
 """
-LoRA adapter for SDXL UNet.
+LoRA injection / save / load for an SDXL UNet.
 
-Injects low-rank matrices (A, B) into the attention projection layers of the
-SDXL UNet using HuggingFace PEFT. Only rank-decomposed matrices are trained;
-the base UNet remains frozen.
+This module turns an off-the-shelf `UNet2DConditionModel` into a LoRA-tuned UNet
+by surgically replacing selected `nn.Linear` layers with `LoRALinear` wrappers,
+then provides helpers to persist/restore just the LoRA deltas in a format that
+`diffusers`' `pipe.load_lora_weights(...)` can read.
 
-Reference: Hu et al. (2022) https://arxiv.org/abs/2106.09685
+Public surface
+--------------
+- `inject_lora_into_unet(unet, ...) -> list[nn.Parameter]`
+- `save_lora_weights(unet, save_directory) -> None`
+- `load_lora_weights(unet, load_directory, ...) -> None`
+
+References
+----------
+- microsoft/LoRA  (algorithm)
+- huggingface/peft  (wrap-not-subclass module-replacement pattern)
+- huggingface/diffusers  (on-disk key naming: `lora.down.weight` / `lora.up.weight`)
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import json
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Optional
 
 import torch
 import torch.nn as nn
-from diffusers import UNet2DConditionModel
-from peft import LoraConfig, get_peft_model, PeftModel
+from safetensors.torch import load_file as safetensors_load
+from safetensors.torch import save_file as safetensors_save
+
+from .layers import LoRALinear
+
+# SDXL attention projections we adapt by default.
+# - Self-attn (attn1) and cross-attn (attn2): to_q / to_k / to_v / to_out.0
+# - SDXL's *added* cross-attention (text-time conditioning): add_q_proj / add_k_proj / add_v_proj / to_add_out
+# Dropping the "add_*" entries silently breaks SDXL — see copilot-instructions.
+DEFAULT_TARGET_MODULES: tuple[str, ...] = (
+    "to_q",
+    "to_k",
+    "to_v",
+    "to_out.0",
+    "add_q_proj",
+    "add_k_proj",
+    "add_v_proj",
+    "to_add_out",
+)
 
 
-@dataclass
-class LoRAConfig:
-    rank: int = 16
-    alpha: int = 16
-    target_modules: list[str] = field(default_factory=lambda: [
-        "to_q", "to_k", "to_v", "to_out.0",
-        "add_q_proj", "add_k_proj", "add_v_proj", "to_add_out",
-    ])
-    dropout: float = 0.0
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
-
-class LoRASDXL(nn.Module):
+def _get_parent(root: nn.Module, dotted_path: str) -> tuple[nn.Module, str]:
     """
-    Wraps an SDXL UNet with PEFT LoRA adapters.
+    Resolve `root.<dotted_path>` to (parent_module, leaf_attr_name).
 
-    Trainable parameters: low-rank A and B matrices inserted into every
-    target attention module. Parameter count scales as:
-        2 × rank × (d_in + d_out)  per target layer.
+    Example:
+        path = "down_blocks.0.attentions.0.transformer_blocks.0.attn1.to_q"
+        returns (root.down_blocks[0]...attn1, "to_q")
+
+    Notes
+    -----
+    - Supports both `nn.Module` attributes (use `getattr`) and integer
+      indices into `nn.ModuleList` / `nn.Sequential` (use `int(...)`).
+    - The caller can then do `setattr(parent, leaf, new_child)` (or
+      `parent[int(leaf)] = new_child` for list-like parents).
     """
+    # TODO: split dotted_path on ".", walk all but the last segment,
+    #       returning (current_module, last_segment).
+    parts = dotted_path.split('.')
+    current_module = root
+    for part in parts[:-1]:
+        current_module = getattr(current_module, part)
+    return current_module, parts[-1]
 
-    def __init__(
-        self,
-        unet: UNet2DConditionModel,
-        lora_cfg: Optional[LoRAConfig] = None,
-    ) -> None:
-        super().__init__()
-        if lora_cfg is None:
-            lora_cfg = LoRAConfig()
 
-        peft_config = LoraConfig(
-            r=lora_cfg.rank,
-            lora_alpha=lora_cfg.alpha,
-            target_modules=lora_cfg.target_modules,
-            lora_dropout=lora_cfg.dropout,
-            bias="none",
-        )
-        self.unet: PeftModel = get_peft_model(unet, peft_config)
-        self.lora_cfg = lora_cfg
+def _set_submodule(parent: nn.Module, leaf: str, new_child: nn.Module) -> None:
+    """
+    Replace a child of `parent` named `leaf` with `new_child`.
 
-    def trainable_parameters(self) -> list[nn.Parameter]:
-        return [p for p in self.unet.parameters() if p.requires_grad]
+    `nn.ModuleList` / `nn.Sequential` use integer indices; everything else uses
+    attribute access. Using `setattr` works for both because PyTorch overrides
+    `__setattr__` on ModuleList/Sequential to accept stringified ints — but it
+    silently coerces the type, so we branch explicitly to be safe.
+    """
+    if leaf.isdigit() and isinstance(parent, (nn.ModuleList, nn.Sequential)):
+        parent[int(leaf)] = new_child  
+    else:
+        setattr(parent, leaf, new_child)  
 
-    def num_trainable_parameters(self) -> int:
-        return sum(p.numel() for p in self.trainable_parameters())
 
-    def print_trainable_summary(self) -> None:
-        total = sum(p.numel() for p in self.unet.parameters())
-        trainable = self.num_trainable_parameters()
-        print(
-            f"LoRA trainable params: {trainable:,} / {total:,} "
-            f"({100 * trainable / total:.2f}%)"
-        )
+def _name_matches_target(module_name: str, targets: Iterable[str]) -> bool:
+    """
+    True iff `module_name` ends in any of `targets`.
 
-    def save_pretrained(self, save_directory: str | Path) -> None:
-        save_directory = Path(save_directory)
-        save_directory.mkdir(parents=True, exist_ok=True)
-        self.unet.save_pretrained(str(save_directory))
+    A target like "to_out.0" must match the *suffix* of the dotted path, not
+    just the leaf — that's what distinguishes `attn.to_out.0` (the Linear) from
+    `attn.to_out.1` (the Dropout). Matching the leaf "0" alone would be wrong.
+    """
+    return any(module_name == t or module_name.endswith("." + t) for t in targets)
 
-    @classmethod
-    def load_pretrained(
-        cls,
-        unet: UNet2DConditionModel,
-        load_directory: str | Path,
-        lora_cfg: Optional[LoRAConfig] = None,
-    ) -> "LoRASDXL":
-        instance = cls.__new__(cls)
-        super(LoRASDXL, instance).__init__()
-        instance.lora_cfg = lora_cfg or LoRAConfig()
-        instance.unet = PeftModel.from_pretrained(unet, str(load_directory))
-        return instance
 
-    def forward(self, *args, **kwargs):
-        return self.unet(*args, **kwargs)
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def inject_lora_into_unet(
+    unet: nn.Module,
+    target_modules: Iterable[str] = DEFAULT_TARGET_MODULES,
+    rank: int = 16,
+    alpha: float = 16.0,
+    dropout: float = 0.0,
+    verbose: bool = True,
+) -> list[nn.Parameter]:
+    """
+    Walk `unet.named_modules()` and replace every `nn.Linear` whose dotted path
+    ends in one of `target_modules` with a `LoRALinear` wrapping it.
+
+    After injection:
+      - All non-LoRA UNet params have `requires_grad = False`.
+      - The returned list contains *only* the trainable LoRA params
+        (suitable for passing straight to `torch.optim.AdamW`).
+
+    Parameters
+    ----------
+    unet : nn.Module
+        Typically a `diffusers.UNet2DConditionModel`. Modified in place.
+    target_modules : iterable of str
+        Module-name suffixes to match (see `DEFAULT_TARGET_MODULES`).
+    rank, alpha, dropout : LoRA hyperparameters forwarded to `LoRALinear`.
+    verbose : bool
+        If True, print a one-line summary of trainable / total params.
+
+    Returns
+    -------
+    list[nn.Parameter]
+        The LoRA `lora_A` / `lora_B` parameters, in injection order.
+
+    Implementation hints
+    --------------------
+    1. Freeze everything first:    `unet.requires_grad_(False)`.
+    2. Snapshot `list(unet.named_modules())` BEFORE mutating — replacing a
+       child mid-iteration on the live generator can skip or revisit nodes.
+    3. For each (name, module): if `_name_matches_target(name, target_modules)`
+       AND `isinstance(module, nn.Linear)`:
+         a. parent, leaf = `_get_parent(unet, name)`
+         b. new = `LoRALinear(module, rank=rank, alpha=alpha, dropout=dropout)`
+         c. `_set_submodule(parent, leaf, new)`
+         d. extend trainable list with `new.lora_A`, `new.lora_B`
+            (these already have `requires_grad=True` from `nn.Parameter`).
+    4. If `verbose`: count trainable vs total and print.
+    """
+    unet.requires_grad_(False)
+    module_snapshot=list(unet.named_modules())
+    trainable_params: list[nn.Parameter] = []
+    for (name,module) in module_snapshot:
+        if _name_matches_target(name, target_modules) and isinstance(module, nn.Linear):
+            parent, leaf = _get_parent(unet, name)
+            new = LoRALinear(module, rank=rank, alpha=alpha, dropout=dropout)
+            _set_submodule(parent, leaf, new)
+            trainable_params.extend([new.lora_A, new.lora_B])
+    if verbose:
+        n_train = sum(p.numel() for p in trainable_params)
+        n_total = sum(p.numel() for p in unet.parameters())
+        print(f"[LoRA] trainable: {n_train:,} / {n_total:,} ({100*n_train/n_total:.2f}%)")
+    return trainable_params
+
+
+def save_lora_weights(
+    unet: nn.Module,
+    save_directory: str | Path,
+    *,
+    rank: int | None = None,
+    alpha: float | None = None,
+    target_modules: Iterable[str] | None = None,
+) -> Path:
+    """
+    Serialize just the LoRA deltas in a layout `pipe.load_lora_weights()` can read.
+
+    On-disk layout
+    --------------
+    `<save_directory>/pytorch_lora_weights.safetensors` with keys:
+        unet.<dotted module path>.lora.down.weight   <- lora_A
+        unet.<dotted module path>.lora.up.weight     <- lora_B
+
+    e.g. `unet.down_blocks.0.attentions.0.transformer_blocks.0.attn1.to_q.lora.down.weight`
+
+    Plus `<save_directory>/lora_config.json` recording rank / alpha /
+    target_modules so `load_lora_weights` doesn't need them passed in again
+    (single source of truth — see plan §"`load_lora_weights` re-injection").
+
+    Parameters
+    ----------
+    unet : nn.Module
+        A UNet that was passed through `inject_lora_into_unet`.
+    save_directory : path-like
+        Created if missing.
+    rank, alpha, target_modules :
+        Optional metadata for `lora_config.json`. If None we just omit them
+        from the json (the safetensors file is still self-describing by shape).
+
+    Returns
+    -------
+    Path
+        Path to the written `.safetensors` file.
+
+    Implementation hints
+    --------------------
+    1. Walk `unet.named_modules()`; for each `LoRALinear` instance at path `p`,
+       contribute two entries to a dict:
+         f"unet.{p}.lora.down.weight" -> module.lora_A.detach().cpu()
+         f"unet.{p}.lora.up.weight"   -> module.lora_B.detach().cpu()
+    2. `safetensors_save(state_dict, str(save_dir / "pytorch_lora_weights.safetensors"))`.
+    3. If any of (rank, alpha, target_modules) is not None, also dump
+       `lora_config.json`. Use `list(target_modules)` to make it JSON-able.
+    """
+    save_dir=Path(save_directory)
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    state_dict={}
+    for (name, module) in unet.named_modules():
+        if isinstance(module, LoRALinear):
+            state_dict[f"unet.{name}.lora.down.weight"] = module.lora_A.detach().cpu()
+            state_dict[f"unet.{name}.lora.up.weight"] = module.lora_B.detach().cpu()
+    safetensors_save(state_dict, str(save_dir / "pytorch_lora_weights.safetensors"))
+
+    if rank is not None or alpha is not None or target_modules is not None:
+        cfg = {}
+        if rank is not None: cfg["rank"] = rank
+        if alpha is not None: cfg["alpha"] = alpha
+        if target_modules is not None: cfg["target_modules"] = list(target_modules)
+        (save_dir / "lora_config.json").write_text(json.dumps(cfg, indent=2))
+
+    return save_dir / "pytorch_lora_weights.safetensors"
+
+
+def load_lora_weights(
+    unet: nn.Module,
+    load_directory: str | Path,
+    *,
+    rank: int | None = None,
+    alpha: float | None = None,
+    dropout: float = 0.0,
+    target_modules: Iterable[str] | None = None,
+) -> list[nn.Parameter]:
+    """
+    Inverse of `save_lora_weights`. Re-injects LoRA into `unet` (using
+    `lora_config.json` if present, else the kwargs), then loads the deltas.
+
+    Returns the list of trainable LoRA params (same contract as
+    `inject_lora_into_unet`) so callers can resume training if they want.
+
+    Implementation hints
+    --------------------
+    1. cfg_path = load_directory / "lora_config.json"; if it exists, read
+       rank / alpha / target_modules from it (kwargs override → write to `cfg`
+       if explicitly passed).
+    2. trainable = inject_lora_into_unet(unet, target_modules=cfg["target_modules"],
+                                         rank=cfg["rank"], alpha=cfg["alpha"],
+                                         dropout=dropout)
+    3. state = safetensors_load(str(load_directory / "pytorch_lora_weights.safetensors"))
+    4. For each key f"unet.{p}.lora.down.weight" → tensor T:
+         - locate the LoRALinear at `p` (re-walk named_modules into a dict for O(1) lookup)
+         - module.lora_A.data.copy_(T)        # in-place; preserves Parameter identity
+       Same for "lora.up.weight" -> lora_B.
+    5. Return `trainable`.
+
+    Note: external code (e.g. `inference/generate.py`) can also call
+    `pipe.load_lora_weights(load_directory)` directly — diffusers will handle
+    the same key format. This function is for our own training/eval pipeline.
+    """
+    load_dir = Path(load_directory)
+    cfg_path = load_dir / "lora_config.json"
+    if cfg_path.exists():
+        with open(cfg_path, "r") as f:
+            cfg = json.load(f)
+            if rank is None: rank = cfg.get("rank", rank)
+            if alpha is None: alpha = cfg.get("alpha", alpha)
+            if target_modules is None: target_modules = cfg.get("target_modules", target_modules)
+
+    # Fall back to defaults if neither kwargs nor JSON provided values.
+    if rank is None: rank = 16
+    if alpha is None: alpha = 16.0
+    if target_modules is None: target_modules = DEFAULT_TARGET_MODULES
+
+    trainable_params = inject_lora_into_unet(
+        unet, target_modules=target_modules, rank=rank, alpha=alpha, dropout=dropout, verbose=False
+    )
+    state = safetensors_load(str(load_dir / "pytorch_lora_weights.safetensors"))
+
+    modules_by_name = {name: m for name, m in unet.named_modules() if isinstance(m, LoRALinear)}
+
+    for key, tensor in state.items():
+        if key.startswith("unet.") and key.endswith(".lora.down.weight"):
+            module_path = key[len("unet."): -len(".lora.down.weight")]
+            modules_by_name[module_path].lora_A.data.copy_(tensor)
+        elif key.startswith("unet.") and key.endswith(".lora.up.weight"):
+            module_path = key[len("unet."): -len(".lora.up.weight")]
+            modules_by_name[module_path].lora_B.data.copy_(tensor)
+        else:
+            raise ValueError(f"Unexpected key format: {key}")
+    return trainable_params
