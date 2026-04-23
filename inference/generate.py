@@ -103,7 +103,9 @@ def generate_product_image(
         pipe.set_ip_adapter_scale(adapter_scale)
         ip_adapter_image = Image.open(product_path).convert("RGB")
     elif adapter_type == "lora":
-        pipe.unet.load_attn_procs(str(adapter_ckpt))
+        # Loads `pytorch_lora_weights.safetensors` written by
+        # `adapters.lora.model.save_lora_weights` (diffusers attn-procs format).
+        pipe.load_lora_weights(str(adapter_ckpt))
         ip_adapter_image = None
     else:
         raise ValueError(f"Unknown adapter_type: {adapter_type}")

@@ -57,3 +57,24 @@ logs/
 
 # Evaluation artifacts
 results/
+
+
+
+# Datasets / data shares
+StudioDiffusion-datashare-FULL-20260409/
+StudioDiffusion-datashare-PLATFORM-ONLY-20260409/
+*.tar.gz
+
+# Pytest
+.pytest_cache/
+pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# Context / doc files (not part of deliverable)
+lora-implementation-plan.md
+StudioDiffusion.pdf
+.github/
+adapter-pipeline-overview.md
+docs/

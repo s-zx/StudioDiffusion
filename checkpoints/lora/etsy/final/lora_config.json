@@ -1,0 +1,14 @@
+{
+  "rank": 4,
+  "alpha": 4,
+  "target_modules": [
+    "to_q",
+    "to_k",
+    "to_v",
+    "to_out.0",
+    "add_q_proj",
+    "add_k_proj",
+    "add_v_proj",
+    "to_add_out"
+  ]
+}

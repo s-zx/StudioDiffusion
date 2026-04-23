@@ -18,10 +18,11 @@ fi
 
 echo "=== Training LoRA for platform: $PLATFORM ==="
 
+# Run as module so `from adapters.lora.model import ...` resolves from repo root.
 accelerate launch \
   --mixed_precision fp16 \
   --num_processes 1 \
-  adapters/lora/train.py \
+  -m adapters.lora.train \
   --config "$CONFIG"
 
 echo "=== Done. Checkpoint saved to checkpoints/lora/$PLATFORM/final ==="
