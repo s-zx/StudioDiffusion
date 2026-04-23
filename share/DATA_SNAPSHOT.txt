@@ -1,0 +1,19 @@
+StudioDiffusion — data bundle snapshot
+======================================
+
+Packaged on: 20260409
+Git commit: bff43fea0692fc35f84f4767d98d4dbfb3dbd795
+Repository: https://github.com/s-zx/StudioDiffusion
+
+Contents (FULL archive)
+------------------------
+- data/platform_sets/{shopify,etsy,ebay}/     curated JPEGs
+- data/platform_sets/manifests/*.csv          train/val splits + category
+- data/processed/abo_manifest.csv
+- data/processed/deepfashion2_manifest.csv
+- data/processed/deepfashion2/masks/          PNG masks (train + validation)
+
+Curation: produced with curate_platform.py on multi-source pool (ABO + LAION + DF2);
+see repo docs for latest flags. CSV image_path may be absolute paths from packager.
+
+Excluded: data/raw/, clip_embedding_cache.pt
