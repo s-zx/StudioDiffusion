@@ -2,7 +2,7 @@
 
 ## SD-19
 
-Status: functionally complete, with a real local demo run.
+Status: functionally complete, with real local demo runs.
 
 Evidence:
 
@@ -13,11 +13,16 @@ Evidence:
   - mask: `outputs/generate_smoke/shopify_batch1_mask.png`
   - control image: `outputs/generate_smoke/shopify_batch1_control.png`
   - generated output: `outputs/generate_smoke/shopify_batch1_generated.png`
+- Additional tuned local demos were run to improve qualitative output:
+  - `outputs/generate_smoke/shopify_batch1_generated_fixed.png`
+  - `outputs/generate_smoke/shopify_batch1_generated_fixed2.png`
+  - `outputs/generate_smoke/shopify_lipstick_generated.png`
 - During completion work, offline loading was fixed in `adapters/ip_adapter/model.py` by making `CLIPImageProcessor` optional when cached assets are incomplete but explicit torchvision preprocessing is already used.
+- During completion work, `inference/generate.py` was updated to derive a cleaner IP-Adapter reference crop from the segmentation mask and to apply heuristics for background-selected SAM2 masks.
 
 Current limitation:
 
-- The generated image quality from the low-step demo run is not yet presentation quality. The integration path is working, but qualitative tuning (step count, prompt, adapter scale, or better product-specific segmentation) would improve final demo fidelity.
+- Output quality is now strong enough for a working demo, but still benefits from prompt/category-specific tuning and from better segmentation prompts on wearable products like headbands.
 
 ## SD-21
 
@@ -33,6 +38,11 @@ Evidence:
   - `adapters/lora/train.py`
 - Published IP-Adapter results have been captured in:
   - `results/sd21_ip_adapter_overfitting_summary.json`
+- Published IP-Adapter train logs were downloaded locally and analyzed with the repo's own script:
+  - `results/ip_adapter_shopify_overfit.json`
+  - `results/ip_adapter_etsy_overfit.json`
+  - `results/ip_adapter_ebay_overfit.json`
+  - summary write-up: `results/sd21_final_summary.md`
 
 Summary:
 
@@ -43,3 +53,4 @@ Summary:
 Remaining limitation:
 
 - Full local recomputation of `CLIP diversity` and `FID` was not run here because the platform reference image bundles are not present under `data/platform_sets/` in this workspace.
+- LoRA-side overfitting analysis is tooling-ready, but still depends on actual LoRA train logs and generated outputs.

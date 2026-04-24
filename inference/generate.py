@@ -72,6 +72,39 @@ def mask_to_controlnet_conditioning(mask: np.ndarray) -> Image.Image:
     return Image.fromarray(rgb)
 
 
+def normalize_foreground_mask(mask: np.ndarray) -> np.ndarray:
+    """Heuristic fix for SAM2 auto-masks that sometimes select background."""
+    binary = mask.astype(bool)
+    border_pixels = np.concatenate(
+        [binary[0, :], binary[-1, :], binary[:, 0], binary[:, -1]]
+    )
+    border_fill = border_pixels.mean() if len(border_pixels) else 0.0
+    if binary.mean() > 0.5 or border_fill > 0.45:
+        binary = ~binary
+    return binary
+
+
+def build_reference_product_image(product_image: Image.Image, mask: np.ndarray) -> Image.Image:
+    """Apply the foreground mask, crop to the object, and place it on white."""
+    rgb = np.array(product_image.convert("RGB"))
+    mask_bool = mask.astype(bool)
+    ys, xs = np.where(mask_bool)
+    if len(xs) == 0 or len(ys) == 0:
+        return product_image
+
+    pad_x = max(8, int(0.08 * (xs.max() - xs.min() + 1)))
+    pad_y = max(8, int(0.08 * (ys.max() - ys.min() + 1)))
+    x0 = max(0, xs.min() - pad_x)
+    x1 = min(rgb.shape[1], xs.max() + pad_x + 1)
+    y0 = max(0, ys.min() - pad_y)
+    y1 = min(rgb.shape[0], ys.max() + pad_y + 1)
+
+    crop = rgb[y0:y1, x0:x1].copy()
+    crop_mask = mask_bool[y0:y1, x0:x1]
+    crop[~crop_mask] = 255
+    return Image.fromarray(crop)
+
+
 def pick_device(device: str | None = None) -> str:
     if device:
         return device
@@ -259,8 +292,9 @@ def generate_product_image(
         device=segmentation_device,
     )
     product_image = np.array(product_image_pil)
-    mask = extractor.extract(product_image)
+    mask = normalize_foreground_mask(extractor.extract(product_image))
     control_image = mask_to_controlnet_conditioning(mask)
+    reference_image = build_reference_product_image(product_image_pil, mask)
 
     if mask_output_path is not None:
         mask_path = Path(mask_output_path)
@@ -289,7 +323,7 @@ def generate_product_image(
         ip_hidden_states = build_ip_adapter_hidden_states(
             pipe=pipe,
             adapter_ckpt=adapter_ckpt,
-            reference_image=product_image_pil,
+            reference_image=reference_image,
             device=device,
             dtype=torch_dtype,
             adapter_scale=adapter_scale,

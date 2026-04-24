@@ -1,0 +1,84 @@
+{
+  "log_path": "checkpoints/ip_adapter/shopify/train.log",
+  "summary": {
+    "train_points": 0,
+    "val_points": 13,
+    "best_val_loss": 0.072463,
+    "best_val_step": 2000,
+    "final_val_loss": 0.0725,
+    "final_val_step": 3000,
+    "val_loss_delta": 3.699999999999537e-05,
+    "val_loss_delta_pct": 0.05106054124173077,
+    "final_train_loss": null
+  },
+  "curves": {
+    "train": [],
+    "val": [
+      {
+        "step": 250.0,
+        "val_loss": 0.073747,
+        "n": 44.0
+      },
+      {
+        "step": 500.0,
+        "val_loss": 0.073364,
+        "n": 44.0
+      },
+      {
+        "step": 750.0,
+        "val_loss": 0.073088,
+        "n": 44.0
+      },
+      {
+        "step": 1000.0,
+        "val_loss": 0.072865,
+        "n": 44.0
+      },
+      {
+        "step": 1250.0,
+        "val_loss": 0.07274,
+        "n": 44.0
+      },
+      {
+        "step": 1500.0,
+        "val_loss": 0.072577,
+        "n": 44.0
+      },
+      {
+        "step": 1750.0,
+        "val_loss": 0.072576,
+        "n": 44.0
+      },
+      {
+        "step": 2000.0,
+        "val_loss": 0.072463,
+        "n": 44.0
+      },
+      {
+        "step": 2250.0,
+        "val_loss": 0.072484,
+        "n": 44.0
+      },
+      {
+        "step": 2500.0,
+        "val_loss": 0.072478,
+        "n": 44.0
+      },
+      {
+        "step": 2750.0,
+        "val_loss": 0.072505,
+        "n": 44.0
+      },
+      {
+        "step": 3000.0,
+        "val_loss": 0.0725,
+        "n": 44.0
+      },
+      {
+        "step": 3000.0,
+        "val_loss": 0.0725,
+        "n": 44.0
+      }
+    ]
+  }
+}

@@ -1,0 +1,84 @@
+{
+  "log_path": "checkpoints/ip_adapter/etsy/train.log",
+  "summary": {
+    "train_points": 0,
+    "val_points": 13,
+    "best_val_loss": 0.131412,
+    "best_val_step": 750,
+    "final_val_loss": 0.132335,
+    "final_val_step": 3000,
+    "val_loss_delta": 0.0009230000000000071,
+    "val_loss_delta_pct": 0.7023711685386472,
+    "final_train_loss": null
+  },
+  "curves": {
+    "train": [],
+    "val": [
+      {
+        "step": 250.0,
+        "val_loss": 0.131454,
+        "n": 41.0
+      },
+      {
+        "step": 500.0,
+        "val_loss": 0.131414,
+        "n": 41.0
+      },
+      {
+        "step": 750.0,
+        "val_loss": 0.131412,
+        "n": 41.0
+      },
+      {
+        "step": 1000.0,
+        "val_loss": 0.131601,
+        "n": 41.0
+      },
+      {
+        "step": 1250.0,
+        "val_loss": 0.131652,
+        "n": 41.0
+      },
+      {
+        "step": 1500.0,
+        "val_loss": 0.131743,
+        "n": 41.0
+      },
+      {
+        "step": 1750.0,
+        "val_loss": 0.131907,
+        "n": 41.0
+      },
+      {
+        "step": 2000.0,
+        "val_loss": 0.132141,
+        "n": 41.0
+      },
+      {
+        "step": 2250.0,
+        "val_loss": 0.132262,
+        "n": 41.0
+      },
+      {
+        "step": 2500.0,
+        "val_loss": 0.132286,
+        "n": 41.0
+      },
+      {
+        "step": 2750.0,
+        "val_loss": 0.132327,
+        "n": 41.0
+      },
+      {
+        "step": 3000.0,
+        "val_loss": 0.132335,
+        "n": 41.0
+      },
+      {
+        "step": 3000.0,
+        "val_loss": 0.132335,
+        "n": 41.0
+      }
+    ]
+  }
+}
