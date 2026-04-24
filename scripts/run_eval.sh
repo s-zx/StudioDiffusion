@@ -24,7 +24,12 @@ for PLATFORM in "${PLATFORMS[@]}"; do
     python - <<PYEOF
 import json
 from pathlib import Path
-from evaluation import CLIPPlatformAlignment, DINOv2Fidelity, AestheticScorer, BoundaryPreservation
+from evaluation import (
+    AestheticScorer,
+    CLIPDiversity,
+    CLIPPlatformAlignment,
+    FIDScorer,
+)
 
 platform  = "$PLATFORM"
 adapter   = "$ADAPTER"
@@ -36,15 +41,28 @@ ref_dirs  = {
 }
 out_file  = Path("$RESULTS_DIR") / f"{adapter}_{platform}_metrics.json"
 
-gen_images = sorted(gen_dir.glob("*.png")) + sorted(gen_dir.glob("*.jpg"))
+gen_images = sorted(
+    p for p in gen_dir.rglob("*") if p.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}
+)
 
 clip_eval = CLIPPlatformAlignment(device="cuda")
 clip_eval.build_reference_embeddings(ref_dirs)
 metrics = clip_eval.evaluate(gen_images, platform)
+metrics.update(CLIPDiversity(device="cuda").score(gen_images))
 
 aesthetic = AestheticScorer(device="cuda")
-scores    = aesthetic.score_batch([str(p) for p in gen_images])
+scores    = aesthetic.score_batch(gen_images)
 metrics["mean_aesthetic_score"] = sum(scores) / len(scores) if scores else 0.0
+
+try:
+    ref_images = sorted(
+        p for p in ref_dirs[platform].rglob("*")
+        if p.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}
+    )
+    if len(gen_images) >= 2 and len(ref_images) >= 2:
+        metrics["fid"] = FIDScorer(device="cuda").score(gen_images, ref_images)
+except Exception as exc:
+    metrics["fid_error"] = str(exc)
 
 out_file.parent.mkdir(parents=True, exist_ok=True)
 with open(out_file, "w") as f:

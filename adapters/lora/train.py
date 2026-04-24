@@ -11,7 +11,9 @@ python adapters/lora/train.py --config configs/lora/etsy.yaml
 from __future__ import annotations
 
 import argparse
+import csv
 import math
+import time
 from pathlib import Path
 
 import torch
@@ -39,22 +41,35 @@ from adapters.lora.model import (
 # Dataset
 # ---------------------------------------------------------------------------
 class PlatformDataset(Dataset):
-    """Glob `platform_dir` for images; every sample returns the same fixed prompt.
+    """Platform image dataset with optional manifest-driven train/val splits.
 
-    Aesthetic adapter: we want the model to learn the *visual distribution* of
-    a platform, not per-image text→image alignment. So no captions.
+    If ``data/platform_sets/manifests/<platform>_<split>.csv`` exists, we use
+    the same resolved-on-disk naming rule as the IP-Adapter dataset so train
+    and val splits stay consistent across adapter types. If not, we fall back
+    to globbing the whole directory (useful for small local smoke runs).
     """
 
     IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 
-    def __init__(self, platform_dir: str | Path, image_size: int, prompt_template: str) -> None:
+    def __init__(
+        self,
+        platform_dir: str | Path,
+        image_size: int,
+        prompt_template: str,
+        split: str = "train",
+    ) -> None:
+        if split not in ("train", "val"):
+            raise ValueError(f"split must be 'train' or 'val', got {split!r}")
         self.platform_dir = Path(platform_dir)
         self.prompt = prompt_template
-        self.image_paths = sorted(
-            p for p in self.platform_dir.rglob("*") if p.suffix.lower() in self.IMAGE_EXTS
-        )
+        self.split = split
+        self.image_paths = self._load_image_paths()
         if not self.image_paths:
-            raise FileNotFoundError(f"No images found under {self.platform_dir}")
+            if split == "val":
+                return
+            raise FileNotFoundError(
+                f"No images found for split={split!r} under {self.platform_dir}"
+            )
 
         # Standard SDXL pre-processing: resize → center-crop → [-1, 1].
         self.transform = transforms.Compose([
@@ -64,17 +79,155 @@ class PlatformDataset(Dataset):
             transforms.Normalize([0.5], [0.5]),  # → [-1, 1]
         ])
 
+    def _load_image_paths(self) -> list[Path]:
+        manifest_csv = (
+            self.platform_dir.parent / "manifests" / f"{self.platform_dir.name}_{self.split}.csv"
+        )
+        if not manifest_csv.exists():
+            if self.split == "val":
+                return []
+            return sorted(
+                p for p in self.platform_dir.rglob("*") if p.suffix.lower() in self.IMAGE_EXTS
+            )
+
+        with open(manifest_csv, newline="", encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+        if not rows:
+            raise ValueError(f"Manifest is empty (header only): {manifest_csv}")
+
+        resolved: list[Path] = []
+        unresolved: list[str] = []
+        for row in rows:
+            src = Path(row["image_path"])
+            primary = self.platform_dir / f"{src.parent.name}_{src.name}"
+            secondary = self.platform_dir / src.name
+            if primary.exists():
+                resolved.append(primary)
+            elif secondary.exists():
+                resolved.append(secondary)
+            else:
+                unresolved.append(row["image_path"])
+
+        miss_rate = len(unresolved) / len(rows)
+        if miss_rate > 0.05:
+            sample = "\n  ".join(unresolved[:5])
+            raise RuntimeError(
+                f"More than 5% of manifest rows could not be resolved to disk "
+                f"({len(unresolved)}/{len(rows)} = {miss_rate:.1%}). "
+                f"Bundle and manifest may be from different curate runs.\n"
+                f"Sample unresolved paths:\n  {sample}"
+            )
+        if unresolved:
+            print(
+                f"[PlatformDataset] {self.platform_dir.name}/{self.split}: "
+                f"skipped {len(unresolved)} unresolved rows ({miss_rate:.1%})"
+            )
+        return resolved
+
     def __len__(self) -> int:
         return len(self.image_paths)
 
     def __getitem__(self, idx: int) -> dict:
-        # TODO (you):
-        #   1. Open self.image_paths[idx] with PIL, convert to "RGB".
-        #   2. Apply self.transform → tensor of shape (3, image_size, image_size).
-        #   3. Return {"pixel_values": that_tensor, "prompt": self.prompt}.
-        img= Image.open(self.image_paths[idx]).convert("RGB")
+        img = Image.open(self.image_paths[idx]).convert("RGB")
         img_tensor = self.transform(img)
         return {"pixel_values": img_tensor, "prompt": self.prompt}
+
+
+@torch.no_grad()
+def _validate(
+    unet,
+    val_loader,
+    vae,
+    text_encoder_1,
+    text_encoder_2,
+    tokenizer_1,
+    tokenizer_2,
+    noise_scheduler,
+    accelerator,
+    cfg,
+    global_step: int,
+    log_path: Path,
+) -> float:
+    """Run one deterministic validation pass and append val loss to train.log."""
+    unet.eval()
+    try:
+        gen = torch.Generator(device=accelerator.device).manual_seed(cfg.training.seed)
+        total_loss = 0.0
+        n_batches = 0
+        wall_start = time.time()
+        weight_dtype = torch.float16 if accelerator.mixed_precision == "fp16" else torch.float32
+
+        for batch in val_loader:
+            pixel_values = batch["pixel_values"].to(accelerator.device, dtype=weight_dtype)
+            latents = vae.encode(pixel_values).latent_dist.sample(generator=gen)
+            latents = latents * vae.config.scaling_factor
+
+            noise = torch.randn(
+                latents.shape,
+                generator=gen,
+                device=accelerator.device,
+                dtype=latents.dtype,
+            )
+            batch_size = latents.shape[0]
+            timesteps = torch.randint(
+                0,
+                noise_scheduler.config.num_train_timesteps,
+                (batch_size,),
+                generator=gen,
+                device=accelerator.device,
+            ).long()
+            noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
+
+            prompts = batch["prompt"]
+            tokens_1 = tokenizer_1(
+                prompts,
+                padding="max_length",
+                max_length=tokenizer_1.model_max_length,
+                truncation=True,
+                return_tensors="pt",
+            ).input_ids.to(accelerator.device)
+            tokens_2 = tokenizer_2(
+                prompts,
+                padding="max_length",
+                max_length=tokenizer_2.model_max_length,
+                truncation=True,
+                return_tensors="pt",
+            ).input_ids.to(accelerator.device)
+
+            encoder1_out = text_encoder_1(tokens_1, output_hidden_states=True)
+            encoder2_out = text_encoder_2(tokens_2, output_hidden_states=True)
+            text_embeds = torch.cat(
+                [encoder1_out.hidden_states[-2], encoder2_out.hidden_states[-2]], dim=-1
+            )
+            pooled_text_embeds = encoder2_out[0]
+            H = W = cfg.data.image_size
+            add_time_ids = torch.tensor(
+                [[H, W, 0, 0, H, W]] * batch_size,
+                dtype=weight_dtype,
+                device=accelerator.device,
+            )
+
+            noise_pred = accelerator.unwrap_model(unet)(
+                noisy_latents,
+                timesteps,
+                encoder_hidden_states=text_embeds,
+                added_cond_kwargs={"text_embeds": pooled_text_embeds, "time_ids": add_time_ids},
+            ).sample
+
+            loss = F.mse_loss(noise_pred.float(), noise.float(), reduction="mean")
+            total_loss += loss.item()
+            n_batches += 1
+
+        mean_loss = total_loss / max(n_batches, 1)
+        wall = time.time() - wall_start
+        line = f"step={global_step} val_loss={mean_loss:.6f} wall={wall:.1f}s n={n_batches}"
+        print(f"[validate] {line}")
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+        return mean_loss
+    finally:
+        unet.train()
 
 
 # ---------------------------------------------------------------------------
@@ -88,6 +241,9 @@ def train(cfg_path: str) -> None:
 
     # ── 2. Accelerator ─────────────────────────────────────────────────────
     output_dir = Path(cfg.paths.output_dir) / "lora" / cfg.platform
+    output_dir.mkdir(parents=True, exist_ok=True)
+    train_log = output_dir / "train.log"
+    train_log.touch(exist_ok=True)
     proj_cfg = ProjectConfiguration(
         project_dir=str(output_dir),
         logging_dir=str(output_dir / "logs"),
@@ -149,6 +305,13 @@ def train(cfg_path: str) -> None:
         platform_dir=cfg.data.platform_dir,
         image_size=cfg.data.image_size,
         prompt_template=cfg.data.prompt_template,
+        split="train",
+    )
+    val_dataset = PlatformDataset(
+        platform_dir=cfg.data.platform_dir,
+        image_size=cfg.data.image_size,
+        prompt_template=cfg.data.prompt_template,
+        split="val",
     )
     dataloader = DataLoader(
         dataset,
@@ -157,11 +320,22 @@ def train(cfg_path: str) -> None:
         num_workers=cfg.training.dataloader_num_workers,
         pin_memory=True,
     )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=cfg.training.train_batch_size,
+        shuffle=False,
+        num_workers=cfg.training.dataloader_num_workers,
+        pin_memory=True,
+    ) if len(val_dataset) > 0 else None
 
     # ── 8. Prepare with accelerator ────────────────────────────────────────
-    unet, optimizer, dataloader, lr_scheduler = accelerator.prepare(
-        unet, optimizer, dataloader, lr_scheduler
-    )
+    prep_items = [unet, optimizer, dataloader, lr_scheduler]
+    if val_loader is not None:
+        prep_items.append(val_loader)
+    prepared = accelerator.prepare(*prep_items)
+    unet, optimizer, dataloader, lr_scheduler = prepared[:4]
+    if val_loader is not None:
+        val_loader = prepared[4]
     # Auxiliaries don't need prepare (frozen + no grads); just push to device + dtype.
     weight_dtype = torch.float16 if accelerator.mixed_precision == "fp16" else torch.float32
     vae            = vae.to(accelerator.device, dtype=weight_dtype)
@@ -188,62 +362,41 @@ def train(cfg_path: str) -> None:
         unet.train()
         for batch in dataloader:
             with accelerator.accumulate(unet):
-                # ── Training step ────────────────────────────────────────────
-                # TODO (you): the actual diffusion math.
-                #
-                #   
-                #
-                #   # 1. VAE encode pixels → latents, scale by vae.config.scaling_factor.
-                #   # 2. Sample noise ε ~ N(0, I) with same shape as latents.
-                #   # 3. Sample timesteps t ~ U{0, num_train_timesteps-1}.
-                #   # 4. noisy_latents = noise_scheduler.add_noise(latents, ε, t)
-                #   # 5. Text-encode batch["prompt"] with both tokenizers/text_encoders;
-                #   #      concat hidden_states[-2] of each → encoder_hidden_states (B, 77, 2048)
-                #   #      pooled_text_embeds = enc2_out[0]
-                #   #      add_time_ids = torch.tensor([[H, W, 0, 0, H, W]] * B, device=…)
-                #   # 6. noise_pred = unet(noisy_latents, t,
-                #   #                      encoder_hidden_states=...,
-                #   #                      added_cond_kwargs={"text_embeds": pooled, "time_ids": add_time_ids}).sample
-                #   # 7. loss = F.mse_loss(noise_pred.float(), ε.float())
-                #   #
-                #   # ── 11. Optional min-SNR weighting ───────────────────────
-                #   #   if cfg.noise.snr_gamma > 0:
-                #   #       from diffusers.training_utils import compute_snr
-                #   #       snr = compute_snr(noise_scheduler, t)
-                #   #       w = torch.minimum(snr, cfg.noise.snr_gamma * torch.ones_like(snr)) / snr
-                #   #       per_sample = F.mse_loss(noise_pred.float(), ε.float(), reduction="none").mean([1,2,3])
-                #   #       loss = (per_sample * w).mean()
-                #   #
-                #   # accelerator.backward(loss)
-                #   # if accelerator.sync_gradients:
-                #   #     accelerator.clip_grad_norm_(trainable_params, 1.0)
-                #   # optimizer.step(); lr_scheduler.step(); optimizer.zero_grad()
                 pixel_values = batch["pixel_values"].to(accelerator.device, dtype=weight_dtype)
                 with torch.no_grad():
-                    latents=vae.encode(pixel_values).latent_dist.sample()
-                    latents=latents * vae.config.scaling_factor
-                noise=torch.randn_like(latents)
-                batch_size=latents.shape[0]
-                timestamps=torch.randint(0, noise_scheduler.config.num_train_timesteps, (batch_size,), device=latents.device).long()
+                    latents = vae.encode(pixel_values).latent_dist.sample()
+                    latents = latents * vae.config.scaling_factor
+                noise = torch.randn_like(latents)
+                batch_size = latents.shape[0]
+                timestamps = torch.randint(
+                    0,
+                    noise_scheduler.config.num_train_timesteps,
+                    (batch_size,),
+                    device=latents.device,
+                ).long()
 
-                noisy_latents= noise_scheduler.add_noise(latents, noise, timestamps)
-                prompts=batch["prompt"]
+                noisy_latents = noise_scheduler.add_noise(latents, noise, timestamps)
+                prompts = batch["prompt"]
                 tokens_1 = tokenizer_1(
-                    prompts,padding="max_length",
+                    prompts,
+                    padding="max_length",
                     max_length=tokenizer_1.model_max_length,
                     truncation=True, return_tensors="pt",
                 ).input_ids.to(accelerator.device)
                 tokens_2 = tokenizer_2(
-                    prompts,padding="max_length",
+                    prompts,
+                    padding="max_length",
                     max_length=tokenizer_2.model_max_length,
                     truncation=True, return_tensors="pt",
                 ).input_ids.to(accelerator.device)
 
                 with torch.no_grad():
-                    encoder1_out=text_encoder_1(tokens_1, output_hidden_states=True)
-                    encoder2_out=text_encoder_2(tokens_2, output_hidden_states=True)
-
-                    text_embeds=torch.cat([encoder1_out.hidden_states[-2], encoder2_out.hidden_states[-2]], dim=-1)
+                    encoder1_out = text_encoder_1(tokens_1, output_hidden_states=True)
+                    encoder2_out = text_encoder_2(tokens_2, output_hidden_states=True)
+                    text_embeds = torch.cat(
+                        [encoder1_out.hidden_states[-2], encoder2_out.hidden_states[-2]],
+                        dim=-1,
+                    )
                     pooled_text_embeds = encoder2_out[0]
                 H = W = cfg.data.image_size
                 add_time_ids = torch.tensor(
@@ -253,9 +406,12 @@ def train(cfg_path: str) -> None:
                 if global_step == 0 and accelerator.is_main_process:
                     print(f"text_embeds={text_embeds.shape}  pooled={pooled_text_embeds.shape}  time_ids={add_time_ids.shape}")
 
-                noise_pred=unet(noisy_latents, timestamps,
-                                 encoder_hidden_states=text_embeds,
-                                 added_cond_kwargs={"text_embeds": pooled_text_embeds, "time_ids": add_time_ids}).sample
+                noise_pred = unet(
+                    noisy_latents,
+                    timestamps,
+                    encoder_hidden_states=text_embeds,
+                    added_cond_kwargs={"text_embeds": pooled_text_embeds, "time_ids": add_time_ids},
+                ).sample
 
                 # ── 11. Loss (with optional min-SNR weighting) ──────────────
                 # min-SNR (Hang et al. 2023): re-weight per-sample MSE by
@@ -286,6 +442,30 @@ def train(cfg_path: str) -> None:
                     {"train/loss": float(loss), "train/lr": lr_scheduler.get_last_lr()[0]},
                     step=global_step,
                 )
+                if accelerator.is_main_process:
+                    with open(train_log, "a", encoding="utf-8") as f:
+                        f.write(
+                            f"step={global_step} train_loss={float(loss):.6f} "
+                            f"lr={lr_scheduler.get_last_lr()[0]:.8f}\n"
+                        )
+                if (
+                    val_loader is not None
+                    and global_step % cfg.training.validation_steps == 0
+                ):
+                    _validate(
+                        unet,
+                        val_loader,
+                        vae,
+                        text_encoder_1,
+                        text_encoder_2,
+                        tokenizer_1,
+                        tokenizer_2,
+                        noise_scheduler,
+                        accelerator,
+                        cfg,
+                        global_step,
+                        train_log,
+                    )
                 if global_step % cfg.training.checkpointing_steps == 0 and accelerator.is_main_process:
                     save_lora_weights(
                         accelerator.unwrap_model(unet),
@@ -297,6 +477,22 @@ def train(cfg_path: str) -> None:
                 if global_step >= cfg.training.max_train_steps:
                     done = True
                     break
+
+    if val_loader is not None:
+        _validate(
+            unet,
+            val_loader,
+            vae,
+            text_encoder_1,
+            text_encoder_2,
+            tokenizer_1,
+            tokenizer_2,
+            noise_scheduler,
+            accelerator,
+            cfg,
+            global_step,
+            train_log,
+        )
 
     # ── 12. Final save ─────────────────────────────────────────────────────
     accelerator.wait_for_everyone()

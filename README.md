@@ -111,6 +111,8 @@ Operational detail: [`docs/team-data-pipeline-handoff.md`](docs/team-data-pipeli
 | Metric | Tool | Goal |
 |--------|------|------|
 | Platform aesthetic alignment | CLIP cosine sim + cluster accuracy | Primary |
+| Diversity / mode collapse | CLIP pairwise distance + NN similarity | Overfitting detection |
+| Distribution realism | FID | Overfitting / realism tradeoff |
 | Product identity fidelity | DINOv2 feature similarity | Foreground preservation |
 | Multi-dim aesthetic scoring | LAION Aesthetic Predictor v2 | Quality |
 | Boundary preservation | Round-trip IoU + LPIPS | Mask fidelity |
@@ -138,6 +140,13 @@ bash scripts/train_lora.sh etsy
 
 # Run full evaluation
 bash scripts/run_eval.sh
+
+# Summarize overfitting from a training log (+ optional image metrics)
+.venv/bin/python scripts/run_overfit_analysis.py \
+  --log checkpoints/ip_adapter/shopify/train.log \
+  --generated-dir outputs/ip_adapter/shopify \
+  --reference-dir data/platform_sets/shopify \
+  --output results/ip_adapter_shopify_overfit.json
 ```
 
 ## Generation

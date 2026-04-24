@@ -74,11 +74,17 @@ class AestheticScorer:
         self.mlp.load_state_dict(ckpt)
         self.mlp.eval()
 
-    @torch.no_grad()
-    def score(self, image: Image.Image | np.ndarray) -> float:
+    @staticmethod
+    def _coerce_image(image: Image.Image | np.ndarray | str | Path) -> Image.Image:
+        if isinstance(image, (str, Path)):
+            image = Image.open(image)
         if isinstance(image, np.ndarray):
             image = Image.fromarray(image)
-        inp = self.preprocess(image.convert("RGB")).unsqueeze(0).to(self.device)
+        return image.convert("RGB")
+
+    @torch.no_grad()
+    def score(self, image: Image.Image | np.ndarray | str | Path) -> float:
+        inp = self.preprocess(self._coerce_image(image)).unsqueeze(0).to(self.device)
         clip_feat = self.clip_model.encode_image(inp)
         clip_feat = clip_feat / clip_feat.norm(dim=-1, keepdim=True)
         score = self.mlp(clip_feat.float())
@@ -87,16 +93,14 @@ class AestheticScorer:
     @torch.no_grad()
     def score_batch(
         self,
-        images: list[Image.Image | np.ndarray],
+        images: list[Image.Image | np.ndarray | str | Path],
         batch_size: int = 32,
     ) -> list[float]:
         all_scores = []
         for i in range(0, len(images), batch_size):
             batch_imgs = []
             for img in images[i : i + batch_size]:
-                if isinstance(img, np.ndarray):
-                    img = Image.fromarray(img)
-                batch_imgs.append(self.preprocess(img.convert("RGB")))
+                batch_imgs.append(self.preprocess(self._coerce_image(img)))
             inp = torch.stack(batch_imgs).to(self.device)
             clip_feat = self.clip_model.encode_image(inp)
             clip_feat = clip_feat / clip_feat.norm(dim=-1, keepdim=True)
