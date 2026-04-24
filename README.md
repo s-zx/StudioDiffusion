@@ -139,3 +139,78 @@ bash scripts/train_lora.sh etsy
 # Run full evaluation
 bash scripts/run_eval.sh
 ```
+
+## Generation
+
+The end-to-end generation entrypoint is [`inference/generate.py`](inference/generate.py).
+It stitches together:
+
+1. `SAM2` foreground extraction
+2. `SDXL` image generation
+3. a trained platform adapter (`IP-Adapter` or `LoRA`)
+
+For the most stable demo path, run the bundled smoke script:
+
+```bash
+bash scripts/prepare_generation_assets.sh shopify
+bash scripts/run_generate_smoke.sh path/to/product.jpg
+```
+
+This uses:
+
+- the `shopify` IP-Adapter checkpoint
+- `SAM2` foreground extraction
+- the stable **no-ControlNet** path
+- `512x512` generation for quick validation
+
+Outputs are written to:
+
+```text
+outputs/generate_smoke/shopify/
+├── mask.png
+├── control.png
+└── generated.png
+```
+
+You can also call the entrypoint directly:
+
+```bash
+.venv/bin/python inference/generate.py \
+  --product path/to/product.jpg \
+  --platform shopify \
+  --adapter ip_adapter \
+  --adapter_ckpt checkpoints/ip_adapter/shopify/final \
+  --disable-controlnet \
+  --device mps \
+  --segmentation-device cpu \
+  --dtype fp16 \
+  --steps 8 \
+  --height 512 \
+  --width 512 \
+  --mask-output outputs/shopify_mask.png \
+  --control-output outputs/shopify_control.png \
+  --output outputs/shopify_generated.png
+```
+
+### Current status
+
+- `IP-Adapter` end-to-end generation is wired up and smoke-tested.
+- `LoRA` is supported by the CLI entrypoint, but still depends on having trained LoRA checkpoints available locally.
+- The experimental `ControlNet` branch is optional; if the ControlNet model cannot be loaded, `generate.py` can fall back to base `SDXL` unless `--strict-controlnet` is set.
+- Add `--local-files-only` once your Hugging Face assets are already cached and you want fully offline generation.
+
+### Asset preparation
+
+If generation assets are missing, cache them with:
+
+```bash
+bash scripts/prepare_generation_assets.sh shopify
+```
+
+This prepares the minimum asset bundle for the current SD-19 demo path:
+
+- `sdxl-vae-fp16-fix`
+- `stable-diffusion-xl-base-1.0`
+- `clip-vit-large-patch14-336`
+- `shopify` IP-Adapter checkpoint
+- `sam2_hiera_large.pt`

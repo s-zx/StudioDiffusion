@@ -57,6 +57,7 @@ Thumbs.db
 # Logs
 *.log
 logs/
+tmp_smoke/
 
 # Evaluation artifacts
 results/

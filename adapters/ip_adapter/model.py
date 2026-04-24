@@ -175,6 +175,7 @@ class IPAdapterSDXL(nn.Module):
         image_encoder_id: str = "openai/clip-vit-large-patch14-336",
         num_tokens: int = 16,
         adapter_scale: float = 1.0,
+        local_files_only: bool = False,
     ) -> None:
         super().__init__()
         self.unet = unet
@@ -182,9 +183,14 @@ class IPAdapterSDXL(nn.Module):
         self.num_tokens = num_tokens
 
         self.image_encoder = CLIPVisionModelWithProjection.from_pretrained(
-            image_encoder_id, torch_dtype=torch.float32,
+            image_encoder_id,
+            torch_dtype=torch.float32,
+            local_files_only=local_files_only,
         )
-        self.feature_extractor = CLIPImageProcessor.from_pretrained(image_encoder_id)
+        self.feature_extractor = CLIPImageProcessor.from_pretrained(
+            image_encoder_id,
+            local_files_only=local_files_only,
+        )
 
         clip_embed_dim = self.image_encoder.config.projection_dim
         cross_attn_dim = unet.config.cross_attention_dim
