@@ -1,0 +1,42 @@
+{
+  "source": "Hugging Face model card for jasonshen8848/StudioDiffusion-ip-adapter",
+  "adapter_type": "ip_adapter",
+  "platforms": {
+    "shopify": {
+      "train_images": 353,
+      "val_images": 88,
+      "start_val_loss_step_250": 0.073747,
+      "end_val_loss_step_3000": 0.0725,
+      "best_val_loss": 0.072463,
+      "best_val_step": 2000,
+      "val_loss_delta_pct": -1.7,
+      "overfitting_assessment": "no_clear_overfit"
+    },
+    "etsy": {
+      "train_images": 325,
+      "val_images": 81,
+      "start_val_loss_step_250": 0.131454,
+      "end_val_loss_step_3000": 0.132335,
+      "best_val_loss": 0.131412,
+      "best_val_step": 750,
+      "val_loss_delta_pct": 0.7,
+      "overfitting_assessment": "mild_overfit",
+      "recommended_checkpoint": "checkpoints/ip_adapter/etsy/checkpoint-500"
+    },
+    "ebay": {
+      "train_images": 518,
+      "val_images": 129,
+      "start_val_loss_step_250": 0.058868,
+      "end_val_loss_step_3000": 0.05592,
+      "best_val_loss": 0.05592,
+      "best_val_step": 3000,
+      "val_loss_delta_pct": -5.0,
+      "overfitting_assessment": "no_clear_overfit"
+    }
+  },
+  "notes": [
+    "These metrics come from the published IP-Adapter checkpoints and their train.log summaries.",
+    "The Etsy adapter is the only platform with a documented validation-loss rebound after its best step.",
+    "CLIP diversity and FID tooling now exist in the repo, but reference platform image bundles are not present locally, so those metrics were not recomputed in this workspace."
+  ]
+}

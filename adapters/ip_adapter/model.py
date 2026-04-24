@@ -187,10 +187,16 @@ class IPAdapterSDXL(nn.Module):
             torch_dtype=torch.float32,
             local_files_only=local_files_only,
         )
-        self.feature_extractor = CLIPImageProcessor.from_pretrained(
-            image_encoder_id,
-            local_files_only=local_files_only,
-        )
+        try:
+            self.feature_extractor = CLIPImageProcessor.from_pretrained(
+                image_encoder_id,
+                local_files_only=local_files_only,
+            )
+        except OSError:
+            # Inference/training paths in this repo already build CLIP pixel values
+            # explicitly via torchvision transforms, so the image processor is
+            # only a convenience. Keep going if the HF cache lacks it.
+            self.feature_extractor = None
 
         clip_embed_dim = self.image_encoder.config.projection_dim
         cross_attn_dim = unet.config.cross_attention_dim
