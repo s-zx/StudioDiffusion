@@ -54,6 +54,11 @@ aesthetic = AestheticScorer(device="cuda")
 scores    = aesthetic.score_batch(gen_images)
 metrics["mean_aesthetic_score"] = sum(scores) / len(scores) if scores else 0.0
 
+sub_results = aesthetic.score_batch_detailed(gen_images)
+for dim in ("composition", "lighting", "color"):
+    vals = [r[dim] for r in sub_results]
+    metrics[f"mean_{dim}_score"] = sum(vals) / len(vals) if vals else 0.0
+
 try:
     ref_images = sorted(
         p for p in ref_dirs[platform].rglob("*")
