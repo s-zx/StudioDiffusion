@@ -1,0 +1,46 @@
+# Core diffusion / generation
+diffusers>=0.27.0
+transformers>=4.40.0
+accelerate>=0.29.0
+peft>=0.10.0
+safetensors>=0.4.3
+
+# Segmentation
+# u2net is loaded from its own repo; see segmentation/u2net_baseline.py
+
+# Image processing
+Pillow>=10.3.0
+opencv-python>=4.9.0
+torchvision>=0.18.0
+einops>=0.7.0
+albumentations>=1.4.0
+
+# Evaluation
+open-clip-torch>=2.24.0
+lpips>=0.1.4
+# dinov2 loaded via torch hub; no separate package needed
+
+# Data / utilities
+boto3>=1.34.0          # ABO download via AWS CLI / S3
+img2dataset>=1.41.0    # LAION download
+huggingface-hub>=0.22.0
+datasets>=2.19.0
+pandas>=2.2.0
+tqdm>=4.66.0
+PyYAML>=6.0.1
+omegaconf>=2.3.0
+
+# Logging / experiment tracking
+wandb>=0.17.0
+tensorboard>=2.17.0
+
+# Notebooks
+jupyterlab>=4.1.0
+matplotlib>=3.8.0
+seaborn>=0.13.0
+scikit-learn>=1.4.0
+
+# Dev / testing
+pytest>=8.1.0
+black>=24.4.0
+ruff>=0.4.0
