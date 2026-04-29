@@ -49,6 +49,8 @@ def main() -> None:
     generation_status = load_json(META_DIR / "generation_status.json")
     run_plan = load_json(META_DIR / "run_plan.json")
     manifest = load_csv(META_DIR / "final_outputs_manifest.csv")
+    ebay_lora_refresh_path = META_DIR / "ebay_lora_lr2e-4_s3000_training_summary.json"
+    ebay_lora_refresh = load_json(ebay_lora_refresh_path) if ebay_lora_refresh_path.exists() else None
 
     overfit_paths = {
         "shopify": RESULTS_DIR / "ip_adapter_shopify_overfit.json",
@@ -304,6 +306,15 @@ Generated from `final eval clean val/metadata/*` and local SD-21 overfitting out
 - Guidance scale: {settings["guidance_scale"]}
 - ControlNet model: `{settings["controlnet_model"]}`
 - Adapter scale (all models in clean eval): `0.1`
+"""
+    if ebay_lora_refresh:
+        report += (
+            f"- eBay LoRA refresh: `{ebay_lora_refresh['model_id']}` from "
+            f"`{ebay_lora_refresh['checkpoint']}` with final val loss "
+            f"`{ebay_lora_refresh['final_val_loss']}`\n"
+        )
+
+    report += """
 
 ## Figure assets
 
@@ -318,6 +329,7 @@ Generated from `final eval clean val/metadata/*` and local SD-21 overfitting out
 
 - This folder is a leakage-free clean validation set built from `data/platform_sets_clean/*/val_only`.
 - Category counts are deduplicated by clean validation case so the same product is not double-counted across LoRA and IP-Adapter outputs.
+- The updated package refreshes the eBay LoRA slice to the best-confirmed `lr=2e-4, step=3000` checkpoint when `metadata/ebay_lora_lr2e-4_s3000_training_summary.json` is present.
 - The clean-eval package contains qualitative outputs and metadata, but not raw reference bundles or metric JSONs for CLIP/FID/LPIPS.
 - SD-21 local train/val overfitting analyses are incorporated here through the `results/ip_adapter_*_overfit.json` files.
 - The qualitative contact sheets include both strong examples and visible failure modes; this is useful for an honest final report discussion section.
@@ -339,6 +351,17 @@ We generated a leakage-free clean validation set using `data/platform_sets_clean
 {overfit_md}
 
 These results show that the clean validation protocol is balanced across platform-adapter combinations, with {generation_status["counts"]["generated"]} / {generation_status["total"]} runs completing successfully. IP-Adapter runs were consistently slower than LoRA runs by roughly 1.2 to 1.7 seconds per sample in this clean-eval export. Overfitting analysis on the published IP-Adapter checkpoints indicates that Etsy is the only platform with a meaningful post-optimum validation-loss increase, while Shopify and eBay remain effectively stable through the final checkpoint.
+"""
+    if ebay_lora_refresh:
+        report_section += (
+            f"\nThe refreshed clean-eval package also upgrades the eBay LoRA slice to "
+            f"`{ebay_lora_refresh['model_id']}` (`{ebay_lora_refresh['checkpoint']}`), "
+            f"whose training summary reports a final validation loss of "
+            f"`{ebay_lora_refresh['final_val_loss']}`. This means the current qualitative "
+            f"eBay LoRA figures are tied to the best-confirmed LoRA setting rather than the older baseline export.\n"
+        )
+
+    report_section += f"""
 
 ## Qualitative figure plan
 

@@ -19,7 +19,7 @@ Generated from `final eval clean val/metadata/*` and local SD-21 overfitting out
 | etsy | ip_adapter | 80 | 23.702 | 23.676 |
 | etsy | lora | 80 | 22.449 | 22.39 |
 | ebay | ip_adapter | 79 | 24.055 | 24.017 |
-| ebay | lora | 79 | 22.385 | 22.343 |
+| ebay | lora | 79 | 22.399 | 22.359 |
 
 ## Table 3. IP-Adapter overfitting summary
 
@@ -63,6 +63,8 @@ Generated from `final eval clean val/metadata/*` and local SD-21 overfitting out
 - Guidance scale: 8.5
 - ControlNet model: `diffusers/controlnet-canny-sdxl-1.0`
 - Adapter scale (all models in clean eval): `0.1`
+- eBay LoRA refresh: `ebay_lora_lr2e-4_s3000` from `checkpoints/lora/ebay_lr2e-4_s3000/final` with final val loss `0.056886`
+
 
 ## Figure assets
 
@@ -92,6 +94,7 @@ Generated from `final eval clean val/metadata/*` and local SD-21 overfitting out
 
 - This folder is a leakage-free clean validation set built from `data/platform_sets_clean/*/val_only`.
 - Category counts are deduplicated by clean validation case so the same product is not double-counted across LoRA and IP-Adapter outputs.
+- The updated package refreshes the eBay LoRA slice to the best-confirmed `lr=2e-4, step=3000` checkpoint when `metadata/ebay_lora_lr2e-4_s3000_training_summary.json` is present.
 - The clean-eval package contains qualitative outputs and metadata, but not raw reference bundles or metric JSONs for CLIP/FID/LPIPS.
 - SD-21 local train/val overfitting analyses are incorporated here through the `results/ip_adapter_*_overfit.json` files.
 - The qualitative contact sheets include both strong examples and visible failure modes; this is useful for an honest final report discussion section.

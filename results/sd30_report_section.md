@@ -19,7 +19,7 @@ We generated a leakage-free clean validation set using `data/platform_sets_clean
 | etsy | ip_adapter | 80 | 23.702 | 23.676 |
 | etsy | lora | 80 | 22.449 | 22.39 |
 | ebay | ip_adapter | 79 | 24.055 | 24.017 |
-| ebay | lora | 79 | 22.385 | 22.343 |
+| ebay | lora | 79 | 22.399 | 22.359 |
 
 | Platform | Best Step | Best Val Loss | Final Step | Final Val Loss | Delta % |
 | --- | --- | --- | --- | --- | --- |
@@ -28,6 +28,9 @@ We generated a leakage-free clean validation set using `data/platform_sets_clean
 | ebay | 3000 | 0.05592 | 3000 | 0.05592 | 0.0 |
 
 These results show that the clean validation protocol is balanced across platform-adapter combinations, with 468 / 468 runs completing successfully. IP-Adapter runs were consistently slower than LoRA runs by roughly 1.2 to 1.7 seconds per sample in this clean-eval export. Overfitting analysis on the published IP-Adapter checkpoints indicates that Etsy is the only platform with a meaningful post-optimum validation-loss increase, while Shopify and eBay remain effectively stable through the final checkpoint.
+
+The refreshed clean-eval package also upgrades the eBay LoRA slice to `ebay_lora_lr2e-4_s3000` (`checkpoints/lora/ebay_lr2e-4_s3000/final`), whose training summary reports a final validation loss of `0.056886`. This means the current qualitative eBay LoRA figures are tied to the best-confirmed LoRA setting rather than the older baseline export.
+
 
 ## Qualitative figure plan
 
