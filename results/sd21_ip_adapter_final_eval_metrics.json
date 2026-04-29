@@ -1,0 +1,50 @@
+[
+  {
+    "platform": "shopify",
+    "adapter": "ip_adapter",
+    "generated_count": "75",
+    "reference_count": "75",
+    "mean_cosine_sim": "0.7463722229003906",
+    "mean_cosine_sim_shopify": "0.7463722229003906",
+    "mean_cosine_sim_etsy": "0.7515594363212585",
+    "mean_cosine_sim_ebay": "0.7465183734893799",
+    "knn_accuracy": "0.3333333333333333",
+    "clip_diversity_mean_pairwise_distance": "0.34776049852371216",
+    "clip_diversity_mean_pairwise_similarity": "0.6522395610809326",
+    "clip_diversity_mean_nearest_neighbor_similarity": "0.8052899837493896",
+    "clip_diversity_sample_count": "75.0",
+    "fid": "233.80156073542648"
+  },
+  {
+    "platform": "etsy",
+    "adapter": "ip_adapter",
+    "generated_count": "80",
+    "reference_count": "80",
+    "mean_cosine_sim": "0.8517282605171204",
+    "mean_cosine_sim_shopify": "0.743938148021698",
+    "mean_cosine_sim_etsy": "0.8517282605171204",
+    "mean_cosine_sim_ebay": "0.7464617490768433",
+    "knn_accuracy": "1.0",
+    "clip_diversity_mean_pairwise_distance": "0.16814938187599182",
+    "clip_diversity_mean_pairwise_similarity": "0.8318505883216858",
+    "clip_diversity_mean_nearest_neighbor_similarity": "0.9089377522468567",
+    "clip_diversity_sample_count": "80.0",
+    "fid": "273.4411393118326"
+  },
+  {
+    "platform": "ebay",
+    "adapter": "ip_adapter",
+    "generated_count": "79",
+    "reference_count": "79",
+    "mean_cosine_sim": "0.7656607031822205",
+    "mean_cosine_sim_shopify": "0.7534958720207214",
+    "mean_cosine_sim_etsy": "0.7685889005661011",
+    "mean_cosine_sim_ebay": "0.7656607031822205",
+    "knn_accuracy": "0.5949367088607594",
+    "clip_diversity_mean_pairwise_distance": "0.2999976873397827",
+    "clip_diversity_mean_pairwise_similarity": "0.7000023722648621",
+    "clip_diversity_mean_nearest_neighbor_similarity": "0.8423148989677429",
+    "clip_diversity_sample_count": "79.0",
+    "fid": "249.96235287676075"
+  }
+]

@@ -12,6 +12,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn as nn
+from scipy.linalg import sqrtm
 from PIL import Image
 from torchvision import models, transforms
 
@@ -30,7 +31,9 @@ class FIDScorer:
     def __init__(self, device: str = "cuda") -> None:
         self.device = device
         weights = models.Inception_V3_Weights.IMAGENET1K_V1
-        self.model = models.inception_v3(weights=weights, aux_logits=False, transform_input=False)
+        self.model = models.inception_v3(weights=weights, transform_input=False)
+        self.model.aux_logits = False
+        self.model.AuxLogits = None
         self.model.fc = nn.Identity()
         self.model = self.model.to(device).eval()
 
@@ -57,12 +60,6 @@ class FIDScorer:
             raise ValueError("FID requires at least two images in each set.")
         return np.cov(arr, rowvar=False)
 
-    @staticmethod
-    def _matrix_sqrt_psd(matrix: np.ndarray) -> np.ndarray:
-        vals, vecs = np.linalg.eigh(matrix)
-        vals = np.clip(vals, a_min=0.0, a_max=None)
-        return (vecs * np.sqrt(vals)) @ vecs.T
-
     def score(self, generated_images: list[Path], real_images: list[Path]) -> float:
         gen_feats = self._embed_images(generated_images)
         real_feats = self._embed_images(real_images)
@@ -75,6 +72,8 @@ class FIDScorer:
         sigma_real = self._covariance(real_feats)
 
         diff = mu_gen - mu_real
-        covmean = self._matrix_sqrt_psd(sigma_gen @ sigma_real)
+        covmean = sqrtm(sigma_gen @ sigma_real)
+        if np.iscomplexobj(covmean):
+            covmean = covmean.real
         fid = diff @ diff + np.trace(sigma_gen + sigma_real - 2.0 * covmean)
         return float(np.real(fid))

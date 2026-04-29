@@ -51,6 +51,8 @@ def main() -> None:
     manifest = load_csv(META_DIR / "final_outputs_manifest.csv")
     ebay_lora_refresh_path = META_DIR / "ebay_lora_lr2e-4_s3000_training_summary.json"
     ebay_lora_refresh = load_json(ebay_lora_refresh_path) if ebay_lora_refresh_path.exists() else None
+    final_eval_metrics_path = RESULTS_DIR / "final_eval_metrics.csv"
+    final_eval_metrics = load_csv(final_eval_metrics_path) if final_eval_metrics_path.exists() else []
 
     overfit_paths = {
         "shopify": RESULTS_DIR / "ip_adapter_shopify_overfit.json",
@@ -167,7 +169,36 @@ def main() -> None:
         ["platform", "category", "count"],
     )
 
-    # Table 6: figure manifest
+    # Table 6: final-eval quality metrics
+    final_eval_rows = []
+    for row in final_eval_metrics:
+        final_eval_rows.append(
+            {
+                "platform": row["platform"],
+                "adapter": row["adapter"],
+                "knn_accuracy": round(float(row["knn_accuracy"]), 3),
+                "mean_cosine_sim": round(float(row["mean_cosine_sim"]), 3),
+                "clip_diversity_mean_pairwise_distance": round(
+                    float(row["clip_diversity_mean_pairwise_distance"]), 3
+                ),
+                "fid": round(float(row["fid"]), 3),
+            }
+        )
+    if final_eval_rows:
+        write_csv(
+            RESULTS_DIR / "sd30_final_eval_metrics.csv",
+            final_eval_rows,
+            [
+                "platform",
+                "adapter",
+                "knn_accuracy",
+                "mean_cosine_sim",
+                "clip_diversity_mean_pairwise_distance",
+                "fid",
+            ],
+        )
+
+    # Table 7: figure manifest
     figure_rows = [
         {
             "figure_id": "fig:overview",
@@ -265,6 +296,20 @@ def main() -> None:
             for row in category_rows[:18]
         ],
     )
+    final_eval_md = markdown_table(
+        ["Platform", "Adapter", "kNN Acc.", "Mean CLIP Sim", "CLIP Div.", "FID"],
+        [
+            [
+                row["platform"],
+                row["adapter"],
+                row["knn_accuracy"],
+                row["mean_cosine_sim"],
+                row["clip_diversity_mean_pairwise_distance"],
+                row["fid"],
+            ]
+            for row in final_eval_rows
+        ],
+    ) if final_eval_rows else ""
 
     galleries = [
         "final eval clean val/galleries/overview_first_8_per_combo.jpg",
@@ -294,6 +339,10 @@ Generated from `final eval clean val/metadata/*` and local SD-21 overfitting out
 ## Table 4. Category coverage snapshot (unique clean-val products)
 
 {category_md}
+
+## Table 5. Final-eval quality metrics
+
+{final_eval_md}
 
 ## Evaluation setup summary
 
@@ -330,7 +379,7 @@ Generated from `final eval clean val/metadata/*` and local SD-21 overfitting out
 - This folder is a leakage-free clean validation set built from `data/platform_sets_clean/*/val_only`.
 - Category counts are deduplicated by clean validation case so the same product is not double-counted across LoRA and IP-Adapter outputs.
 - The updated package refreshes the eBay LoRA slice to the best-confirmed `lr=2e-4, step=3000` checkpoint when `metadata/ebay_lora_lr2e-4_s3000_training_summary.json` is present.
-- The clean-eval package contains qualitative outputs and metadata, but not raw reference bundles or metric JSONs for CLIP/FID/LPIPS.
+- The clean-eval package now supports image-space metrics using the paired `final eval original inputs` bundle; `results/final_eval_metrics.csv` summarizes CLIP alignment, diversity, and FID for all six platform-adapter combinations.
 - SD-21 local train/val overfitting analyses are incorporated here through the `results/ip_adapter_*_overfit.json` files.
 - The qualitative contact sheets include both strong examples and visible failure modes; this is useful for an honest final report discussion section.
 """
@@ -350,6 +399,8 @@ We generated a leakage-free clean validation set using `data/platform_sets_clean
 
 {overfit_md}
 
+{final_eval_md}
+
 These results show that the clean validation protocol is balanced across platform-adapter combinations, with {generation_status["counts"]["generated"]} / {generation_status["total"]} runs completing successfully. IP-Adapter runs were consistently slower than LoRA runs by roughly 1.2 to 1.7 seconds per sample in this clean-eval export. Overfitting analysis on the published IP-Adapter checkpoints indicates that Etsy is the only platform with a meaningful post-optimum validation-loss increase, while Shopify and eBay remain effectively stable through the final checkpoint.
 """
     if ebay_lora_refresh:
@@ -359,6 +410,16 @@ These results show that the clean validation protocol is balanced across platfor
             f"whose training summary reports a final validation loss of "
             f"`{ebay_lora_refresh['final_val_loss']}`. This means the current qualitative "
             f"eBay LoRA figures are tied to the best-confirmed LoRA setting rather than the older baseline export.\n"
+        )
+    if final_eval_rows:
+        report_section += (
+            "\nImage-space metrics on the final-eval bundle add a useful second view. "
+            "Both Etsy adapters achieve perfect k-NN platform classification and the highest "
+            "mean CLIP similarity to their target reference set, but they also show the lowest "
+            "CLIP diversity scores, which is directionally consistent with the mild Etsy "
+            "overfitting signal from training loss. Shopify remains the weakest platform in "
+            "platform-alignment terms, while the refreshed eBay LoRA export improves k-NN "
+            "accuracy over eBay IP-Adapter and remains competitive on diversity and FID.\n"
         )
 
     report_section += f"""

@@ -27,9 +27,20 @@ We generated a leakage-free clean validation set using `data/platform_sets_clean
 | etsy | 750 | 0.131412 | 3000 | 0.132335 | 0.702 |
 | ebay | 3000 | 0.05592 | 3000 | 0.05592 | 0.0 |
 
+| Platform | Adapter | kNN Acc. | Mean CLIP Sim | CLIP Div. | FID |
+| --- | --- | --- | --- | --- | --- |
+| shopify | ip_adapter | 0.333 | 0.746 | 0.348 | 233.802 |
+| shopify | lora | 0.293 | 0.74 | 0.358 | 243.953 |
+| etsy | ip_adapter | 1.0 | 0.852 | 0.168 | 273.441 |
+| etsy | lora | 1.0 | 0.848 | 0.173 | 264.222 |
+| ebay | ip_adapter | 0.595 | 0.766 | 0.3 | 249.962 |
+| ebay | lora | 0.684 | 0.759 | 0.304 | 251.594 |
+
 These results show that the clean validation protocol is balanced across platform-adapter combinations, with 468 / 468 runs completing successfully. IP-Adapter runs were consistently slower than LoRA runs by roughly 1.2 to 1.7 seconds per sample in this clean-eval export. Overfitting analysis on the published IP-Adapter checkpoints indicates that Etsy is the only platform with a meaningful post-optimum validation-loss increase, while Shopify and eBay remain effectively stable through the final checkpoint.
 
 The refreshed clean-eval package also upgrades the eBay LoRA slice to `ebay_lora_lr2e-4_s3000` (`checkpoints/lora/ebay_lr2e-4_s3000/final`), whose training summary reports a final validation loss of `0.056886`. This means the current qualitative eBay LoRA figures are tied to the best-confirmed LoRA setting rather than the older baseline export.
+
+Image-space metrics on the final-eval bundle add a useful second view. Both Etsy adapters achieve perfect k-NN platform classification and the highest mean CLIP similarity to their target reference set, but they also show the lowest CLIP diversity scores, which is directionally consistent with the mild Etsy overfitting signal from training loss. Shopify remains the weakest platform in platform-alignment terms, while the refreshed eBay LoRA export improves k-NN accuracy over eBay IP-Adapter and remains competitive on diversity and FID.
 
 
 ## Qualitative figure plan

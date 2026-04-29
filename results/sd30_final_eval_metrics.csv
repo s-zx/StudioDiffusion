@@ -1,0 +1,7 @@
+platform,adapter,knn_accuracy,mean_cosine_sim,clip_diversity_mean_pairwise_distance,fid
+shopify,ip_adapter,0.333,0.746,0.348,233.802
+shopify,lora,0.293,0.74,0.358,243.953
+etsy,ip_adapter,1.0,0.852,0.168,273.441
+etsy,lora,1.0,0.848,0.173,264.222
+ebay,ip_adapter,0.595,0.766,0.3,249.962
+ebay,lora,0.684,0.759,0.304,251.594

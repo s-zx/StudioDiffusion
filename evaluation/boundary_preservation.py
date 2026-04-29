@@ -67,6 +67,13 @@ class BoundaryPreservation:
         if isinstance(generated, Image.Image):
             generated = np.array(generated.convert("RGB"))
         gen_mask = self.sam2.extract(generated)
+        if gen_mask.shape != original_mask.shape:
+            gen_mask = np.array(
+                Image.fromarray(gen_mask.astype(np.uint8) * 255).resize(
+                    (original_mask.shape[1], original_mask.shape[0]),
+                    resample=Image.Resampling.NEAREST,
+                )
+            ) > 0
         return _iou(gen_mask, original_mask.astype(bool))
 
     @torch.no_grad()
