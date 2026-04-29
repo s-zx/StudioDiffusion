@@ -1,0 +1,4 @@
+platform,best_val_step,best_val_loss,final_val_step,final_val_loss,val_loss_delta_pct
+shopify,2000,0.072463,3000,0.0725,0.051
+etsy,750,0.131412,3000,0.132335,0.702
+ebay,3000,0.05592,3000,0.05592,0.0

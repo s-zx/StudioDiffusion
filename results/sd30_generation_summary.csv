@@ -1,0 +1,7 @@
+platform,adapter,outputs,mean_elapsed_seconds,median_elapsed_seconds
+shopify,ip_adapter,75,23.671,23.66
+shopify,lora,75,22.36,22.376
+etsy,ip_adapter,80,23.702,23.677
+etsy,lora,80,22.449,22.414
+ebay,ip_adapter,79,24.055,24.017
+ebay,lora,79,22.385,22.343

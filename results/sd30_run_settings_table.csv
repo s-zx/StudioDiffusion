@@ -1,0 +1,23 @@
+setting,value
+seed,404
+steps,40
+strength,1.0
+guidance_scale,8.5
+height,1024
+width,1024
+device,cuda
+segmentation_device,cuda
+dtype,bf16
+product_scale,0.45
+controlnet_model,diffusers/controlnet-canny-sdxl-1.0
+controlnet_scale,0.05
+control_guidance_start,0.0
+control_guidance_end,0.25
+canny_low_threshold,120
+canny_high_threshold,240
+inpaint_mask_erode,6
+composite_mask_erode,5
+feather_radius,1.0
+dehalo_edge_radius,0
+dehalo_brightness_threshold,235
+negative_prompt,"white outline, bright rim, halo, cutout edge, pasted object, extra product, duplicate product, extra scene object, extra props, extra text, watermark, blurry, low quality, distorted, artifacts, fake label"
