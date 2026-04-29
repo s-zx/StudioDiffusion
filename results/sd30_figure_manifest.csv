@@ -1,0 +1,8 @@
+figure_id,path,caption,purpose
+fig:overview,final eval clean val/galleries/overview_first_8_per_combo.jpg,Overview of the first eight clean validation outputs for each platform-adapter combination.,High-level qualitative comparison across platforms and adapter types.
+fig:shopify_ip,final eval clean val/galleries/shopify_ip_adapter_contact_sheet.jpg,Shopify IP-Adapter contact sheet over clean validation products.,Qualitative review of clean-background studio behavior and common failure cases.
+fig:shopify_lora,final eval clean val/galleries/shopify_lora_contact_sheet.jpg,Shopify LoRA contact sheet over clean validation products.,Qualitative review of LoRA adaptation behavior for Shopify-style outputs.
+fig:etsy_ip,final eval clean val/galleries/etsy_ip_adapter_contact_sheet.jpg,Etsy IP-Adapter contact sheet over clean validation products.,Qualitative review of warm lifestyle styling on held-out Etsy-like products.
+fig:etsy_lora,final eval clean val/galleries/etsy_lora_contact_sheet.jpg,Etsy LoRA contact sheet over clean validation products.,Compare LoRA styling strength and content preservation for Etsy outputs.
+fig:ebay_ip,final eval clean val/galleries/ebay_ip_adapter_contact_sheet.jpg,eBay IP-Adapter contact sheet over clean validation products.,Qualitative review of utilitarian clarity and plain-background behavior.
+fig:ebay_lora,final eval clean val/galleries/ebay_lora_contact_sheet.jpg,eBay LoRA contact sheet over clean validation products.,Compare LoRA adaptation behavior for eBay-style product presentation.

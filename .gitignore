@@ -67,6 +67,7 @@ results/
 # Datasets / data shares
 StudioDiffusion-datashare-FULL-20260409/
 StudioDiffusion-datashare-PLATFORM-ONLY-20260409/
+final eval clean val/
 *.tar.gz
 
 # Pytest

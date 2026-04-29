@@ -7,6 +7,7 @@ import csv
 import json
 from collections import Counter, defaultdict
 from pathlib import Path
+from statistics import median
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -98,7 +99,7 @@ def main() -> None:
                     "adapter": adapter,
                     "outputs": combo_counts[(platform, adapter)],
                     "mean_elapsed_seconds": round(sum(elapsed) / len(elapsed), 3),
-                    "median_elapsed_seconds": round(sorted(elapsed)[len(elapsed) // 2], 3),
+                    "median_elapsed_seconds": round(median(elapsed), 3),
                 }
             )
     write_csv(
@@ -137,6 +138,82 @@ def main() -> None:
             "final_val_loss",
             "val_loss_delta_pct",
         ],
+    )
+
+    # Table 5: category coverage by platform
+    category_rows = []
+    by_platform_category = defaultdict(Counter)
+    unique_case_keys = set()
+    for row in manifest:
+        case_key = (row["platform"], row["case_id"])
+        if case_key in unique_case_keys:
+            continue
+        unique_case_keys.add(case_key)
+        by_platform_category[row["platform"]][row["category"]] += 1
+    for platform in ("shopify", "etsy", "ebay"):
+        for category, count in by_platform_category[platform].most_common(15):
+            category_rows.append(
+                {
+                    "platform": platform,
+                    "category": category,
+                    "count": count,
+                }
+            )
+    write_csv(
+        RESULTS_DIR / "sd30_category_coverage.csv",
+        category_rows,
+        ["platform", "category", "count"],
+    )
+
+    # Table 6: figure manifest
+    figure_rows = [
+        {
+            "figure_id": "fig:overview",
+            "path": "final eval clean val/galleries/overview_first_8_per_combo.jpg",
+            "caption": "Overview of the first eight clean validation outputs for each platform-adapter combination.",
+            "purpose": "High-level qualitative comparison across platforms and adapter types.",
+        },
+        {
+            "figure_id": "fig:shopify_ip",
+            "path": "final eval clean val/galleries/shopify_ip_adapter_contact_sheet.jpg",
+            "caption": "Shopify IP-Adapter contact sheet over clean validation products.",
+            "purpose": "Qualitative review of clean-background studio behavior and common failure cases.",
+        },
+        {
+            "figure_id": "fig:shopify_lora",
+            "path": "final eval clean val/galleries/shopify_lora_contact_sheet.jpg",
+            "caption": "Shopify LoRA contact sheet over clean validation products.",
+            "purpose": "Qualitative review of LoRA adaptation behavior for Shopify-style outputs.",
+        },
+        {
+            "figure_id": "fig:etsy_ip",
+            "path": "final eval clean val/galleries/etsy_ip_adapter_contact_sheet.jpg",
+            "caption": "Etsy IP-Adapter contact sheet over clean validation products.",
+            "purpose": "Qualitative review of warm lifestyle styling on held-out Etsy-like products.",
+        },
+        {
+            "figure_id": "fig:etsy_lora",
+            "path": "final eval clean val/galleries/etsy_lora_contact_sheet.jpg",
+            "caption": "Etsy LoRA contact sheet over clean validation products.",
+            "purpose": "Compare LoRA styling strength and content preservation for Etsy outputs.",
+        },
+        {
+            "figure_id": "fig:ebay_ip",
+            "path": "final eval clean val/galleries/ebay_ip_adapter_contact_sheet.jpg",
+            "caption": "eBay IP-Adapter contact sheet over clean validation products.",
+            "purpose": "Qualitative review of utilitarian clarity and plain-background behavior.",
+        },
+        {
+            "figure_id": "fig:ebay_lora",
+            "path": "final eval clean val/galleries/ebay_lora_contact_sheet.jpg",
+            "caption": "eBay LoRA contact sheet over clean validation products.",
+            "purpose": "Compare LoRA adaptation behavior for eBay-style product presentation.",
+        },
+    ]
+    write_csv(
+        RESULTS_DIR / "sd30_figure_manifest.csv",
+        figure_rows,
+        ["figure_id", "path", "caption", "purpose"],
     )
 
     # Report-ready markdown
@@ -179,6 +256,13 @@ def main() -> None:
             for row in overfit_rows
         ],
     )
+    category_md = markdown_table(
+        ["Platform", "Category", "Count"],
+        [
+            [row["platform"], row["category"], row["count"]]
+            for row in category_rows[:18]
+        ],
+    )
 
     galleries = [
         "final eval clean val/galleries/overview_first_8_per_combo.jpg",
@@ -205,6 +289,10 @@ Generated from `final eval clean val/metadata/*` and local SD-21 overfitting out
 
 {overfit_md}
 
+## Table 4. Category coverage snapshot (unique clean-val products)
+
+{category_md}
+
 ## Evaluation setup summary
 
 - Total generated outputs: {generation_status["total"]}
@@ -220,17 +308,49 @@ Generated from `final eval clean val/metadata/*` and local SD-21 overfitting out
 ## Figure assets
 
 """
-    for gallery in galleries:
-        report += f"- `{gallery}`\n"
+    for row in figure_rows:
+        report += f"- `{row['figure_id']}`: `{row['path']}`\n"
+        report += f"  - Caption: {row['caption']}\n"
+        report += f"  - Purpose: {row['purpose']}\n"
 
     report += """
 ## Notes
 
 - This folder is a leakage-free clean validation set built from `data/platform_sets_clean/*/val_only`.
+- Category counts are deduplicated by clean validation case so the same product is not double-counted across LoRA and IP-Adapter outputs.
 - The clean-eval package contains qualitative outputs and metadata, but not raw reference bundles or metric JSONs for CLIP/FID/LPIPS.
 - SD-21 local train/val overfitting analyses are incorporated here through the `results/ip_adapter_*_overfit.json` files.
+- The qualitative contact sheets include both strong examples and visible failure modes; this is useful for an honest final report discussion section.
 """
     (RESULTS_DIR / "sd30_results_tables.md").write_text(report, encoding="utf-8")
+
+    report_section = f"""# SD-30 Report Section Draft
+
+## Final evaluation protocol
+
+We generated a leakage-free clean validation set using `data/platform_sets_clean/*/val_only` and evaluated both adapter families (`IP-Adapter` and `LoRA`) on all three target platforms. The final clean evaluation bundle contains {generation_status["total"]} generated outputs across Shopify, Etsy, and eBay. All runs used the same generation settings: 1024x1024 resolution, 40 denoising steps, guidance scale 8.5, and a low ControlNet conditioning scale of 0.05 with `diffusers/controlnet-canny-sdxl-1.0`.
+
+## Quantitative summary
+
+{split_md}
+
+{generation_md}
+
+{overfit_md}
+
+These results show that the clean validation protocol is balanced across platform-adapter combinations, with {generation_status["counts"]["generated"]} / {generation_status["total"]} runs completing successfully. IP-Adapter runs were consistently slower than LoRA runs by roughly 1.2 to 1.7 seconds per sample in this clean-eval export. Overfitting analysis on the published IP-Adapter checkpoints indicates that Etsy is the only platform with a meaningful post-optimum validation-loss increase, while Shopify and eBay remain effectively stable through the final checkpoint.
+
+## Qualitative figure plan
+
+Use `fig:overview` as the main paper figure for side-by-side qualitative comparison across platforms and adapter types. Use the six per-combination contact sheets as appendix figures or backup slides. The Shopify sheets are especially useful for discussing failure cases where the model drifts toward human or mannequin-like presentations for wearable products, while the Etsy and eBay sheets better highlight scene-style and background-style differences.
+
+## Key takeaways
+
+1. The clean validation export is large enough to support a meaningful final qualitative comparison across all six platform-adapter combinations.
+2. The runtime metadata is strong enough to justify a small throughput table in the final report.
+3. The current repo already supports an honest narrative: strong clean-eval coverage, clear overfitting conclusions for IP-Adapter, and visible qualitative failure modes that can be discussed rather than hidden.
+"""
+    (RESULTS_DIR / "sd30_report_section.md").write_text(report_section, encoding="utf-8")
     print("Wrote SD-30 tables to results/")
 
 

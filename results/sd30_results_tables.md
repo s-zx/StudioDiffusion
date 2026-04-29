@@ -16,8 +16,8 @@ Generated from `final eval clean val/metadata/*` and local SD-21 overfitting out
 | --- | --- | --- | --- | --- |
 | shopify | ip_adapter | 75 | 23.671 | 23.66 |
 | shopify | lora | 75 | 22.36 | 22.376 |
-| etsy | ip_adapter | 80 | 23.702 | 23.677 |
-| etsy | lora | 80 | 22.449 | 22.414 |
+| etsy | ip_adapter | 80 | 23.702 | 23.676 |
+| etsy | lora | 80 | 22.449 | 22.39 |
 | ebay | ip_adapter | 79 | 24.055 | 24.017 |
 | ebay | lora | 79 | 22.385 | 22.343 |
 
@@ -28,6 +28,29 @@ Generated from `final eval clean val/metadata/*` and local SD-21 overfitting out
 | shopify | 2000 | 0.072463 | 3000 | 0.0725 | 0.051 |
 | etsy | 750 | 0.131412 | 3000 | 0.132335 | 0.702 |
 | ebay | 3000 | 0.05592 | 3000 | 0.05592 | 0.0 |
+
+## Table 4. Category coverage snapshot (unique clean-val products)
+
+| Platform | Category | Count |
+| --- | --- | --- |
+| shopify | uncategorized | 5 |
+| shopify | COMPUTER | 3 |
+| shopify | BUILDING_MATERIAL | 2 |
+| shopify | PORTABLE_ELECTRONIC_DEVICE_STAND | 2 |
+| shopify | MEAT | 2 |
+| shopify | SLEEPING_BAG | 1 |
+| shopify | SHIPPING_BOX | 1 |
+| shopify | SUNSCREEN | 1 |
+| shopify | STAPLER | 1 |
+| shopify | SECURITY_ELECTRONICS | 1 |
+| shopify | SUITCASE | 1 |
+| shopify | STORAGE_BINDER | 1 |
+| shopify | CAMERA_TRIPOD | 1 |
+| shopify | SAUTE_FRY_PAN | 1 |
+| shopify | SKIN_CLEANING_AGENT | 1 |
+| etsy | uncategorized | 73 |
+| etsy | BOTTLE_RACK | 1 |
+| etsy | STORAGE_BOX | 1 |
 
 ## Evaluation setup summary
 
@@ -43,16 +66,32 @@ Generated from `final eval clean val/metadata/*` and local SD-21 overfitting out
 
 ## Figure assets
 
-- `final eval clean val/galleries/overview_first_8_per_combo.jpg`
-- `final eval clean val/galleries/shopify_ip_adapter_contact_sheet.jpg`
-- `final eval clean val/galleries/shopify_lora_contact_sheet.jpg`
-- `final eval clean val/galleries/etsy_ip_adapter_contact_sheet.jpg`
-- `final eval clean val/galleries/etsy_lora_contact_sheet.jpg`
-- `final eval clean val/galleries/ebay_ip_adapter_contact_sheet.jpg`
-- `final eval clean val/galleries/ebay_lora_contact_sheet.jpg`
+- `fig:overview`: `final eval clean val/galleries/overview_first_8_per_combo.jpg`
+  - Caption: Overview of the first eight clean validation outputs for each platform-adapter combination.
+  - Purpose: High-level qualitative comparison across platforms and adapter types.
+- `fig:shopify_ip`: `final eval clean val/galleries/shopify_ip_adapter_contact_sheet.jpg`
+  - Caption: Shopify IP-Adapter contact sheet over clean validation products.
+  - Purpose: Qualitative review of clean-background studio behavior and common failure cases.
+- `fig:shopify_lora`: `final eval clean val/galleries/shopify_lora_contact_sheet.jpg`
+  - Caption: Shopify LoRA contact sheet over clean validation products.
+  - Purpose: Qualitative review of LoRA adaptation behavior for Shopify-style outputs.
+- `fig:etsy_ip`: `final eval clean val/galleries/etsy_ip_adapter_contact_sheet.jpg`
+  - Caption: Etsy IP-Adapter contact sheet over clean validation products.
+  - Purpose: Qualitative review of warm lifestyle styling on held-out Etsy-like products.
+- `fig:etsy_lora`: `final eval clean val/galleries/etsy_lora_contact_sheet.jpg`
+  - Caption: Etsy LoRA contact sheet over clean validation products.
+  - Purpose: Compare LoRA styling strength and content preservation for Etsy outputs.
+- `fig:ebay_ip`: `final eval clean val/galleries/ebay_ip_adapter_contact_sheet.jpg`
+  - Caption: eBay IP-Adapter contact sheet over clean validation products.
+  - Purpose: Qualitative review of utilitarian clarity and plain-background behavior.
+- `fig:ebay_lora`: `final eval clean val/galleries/ebay_lora_contact_sheet.jpg`
+  - Caption: eBay LoRA contact sheet over clean validation products.
+  - Purpose: Compare LoRA adaptation behavior for eBay-style product presentation.
 
 ## Notes
 
 - This folder is a leakage-free clean validation set built from `data/platform_sets_clean/*/val_only`.
+- Category counts are deduplicated by clean validation case so the same product is not double-counted across LoRA and IP-Adapter outputs.
 - The clean-eval package contains qualitative outputs and metadata, but not raw reference bundles or metric JSONs for CLIP/FID/LPIPS.
 - SD-21 local train/val overfitting analyses are incorporated here through the `results/ip_adapter_*_overfit.json` files.
+- The qualitative contact sheets include both strong examples and visible failure modes; this is useful for an honest final report discussion section.
