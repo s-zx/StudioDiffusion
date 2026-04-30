@@ -1,0 +1,104 @@
+{
+  "shopify": {
+    "ip_adapter": {
+      "platform": "shopify",
+      "adapter": "ip_adapter",
+      "generated_count": 75,
+      "reference_count": 75,
+      "mean_cosine_sim": 0.6694514751434326,
+      "mean_cosine_sim_shopify": 0.6694514751434326,
+      "mean_cosine_sim_etsy": 0.6914870738983154,
+      "mean_cosine_sim_ebay": 0.6738153696060181,
+      "knn_accuracy": 0.21333333333333335,
+      "clip_diversity_mean_pairwise_distance": 0.42405635118484497,
+      "clip_diversity_mean_pairwise_similarity": 0.575943648815155,
+      "clip_diversity_mean_nearest_neighbor_similarity": 0.7560270428657532,
+      "clip_diversity_sample_count": 75.0,
+      "fid": 233.80160563567551
+    },
+    "lora": {
+      "platform": "shopify",
+      "adapter": "lora",
+      "generated_count": 75,
+      "reference_count": 75,
+      "mean_cosine_sim": 0.6687110066413879,
+      "mean_cosine_sim_shopify": 0.6687110066413879,
+      "mean_cosine_sim_etsy": 0.6954965591430664,
+      "mean_cosine_sim_ebay": 0.6736767292022705,
+      "knn_accuracy": 0.18666666666666668,
+      "clip_diversity_mean_pairwise_distance": 0.41908034682273865,
+      "clip_diversity_mean_pairwise_similarity": 0.580919623374939,
+      "clip_diversity_mean_nearest_neighbor_similarity": 0.7593058347702026,
+      "clip_diversity_sample_count": 75.0,
+      "fid": 243.9529784635037
+    }
+  },
+  "etsy": {
+    "ip_adapter": {
+      "platform": "etsy",
+      "adapter": "ip_adapter",
+      "generated_count": 80,
+      "reference_count": 80,
+      "mean_cosine_sim": 0.8250020742416382,
+      "mean_cosine_sim_shopify": 0.6756779551506042,
+      "mean_cosine_sim_etsy": 0.8250020742416382,
+      "mean_cosine_sim_ebay": 0.6851469278335571,
+      "knn_accuracy": 1.0,
+      "clip_diversity_mean_pairwise_distance": 0.1824500560760498,
+      "clip_diversity_mean_pairwise_similarity": 0.817550003528595,
+      "clip_diversity_mean_nearest_neighbor_similarity": 0.8992437124252319,
+      "clip_diversity_sample_count": 80.0,
+      "fid": 273.4411932510738
+    },
+    "lora": {
+      "platform": "etsy",
+      "adapter": "lora",
+      "generated_count": 80,
+      "reference_count": 80,
+      "mean_cosine_sim": 0.8212453722953796,
+      "mean_cosine_sim_shopify": 0.6766767501831055,
+      "mean_cosine_sim_etsy": 0.8212453722953796,
+      "mean_cosine_sim_ebay": 0.6857901811599731,
+      "knn_accuracy": 1.0,
+      "clip_diversity_mean_pairwise_distance": 0.1878061294555664,
+      "clip_diversity_mean_pairwise_similarity": 0.8121938705444336,
+      "clip_diversity_mean_nearest_neighbor_similarity": 0.8976281881332397,
+      "clip_diversity_sample_count": 80.0,
+      "fid": 264.2223832381193
+    }
+  },
+  "ebay": {
+    "ip_adapter": {
+      "platform": "ebay",
+      "adapter": "ip_adapter",
+      "generated_count": 79,
+      "reference_count": 79,
+      "mean_cosine_sim": 0.699734628200531,
+      "mean_cosine_sim_shopify": 0.681259036064148,
+      "mean_cosine_sim_etsy": 0.7176644802093506,
+      "mean_cosine_sim_ebay": 0.699734628200531,
+      "knn_accuracy": 0.4810126582278481,
+      "clip_diversity_mean_pairwise_distance": 0.36127519607543945,
+      "clip_diversity_mean_pairwise_similarity": 0.6387248039245605,
+      "clip_diversity_mean_nearest_neighbor_similarity": 0.8074575662612915,
+      "clip_diversity_sample_count": 79.0,
+      "fid": 249.962412075629
+    },
+    "lora": {
+      "platform": "ebay",
+      "adapter": "lora",
+      "generated_count": 79,
+      "reference_count": 79,
+      "mean_cosine_sim": 0.6919665932655334,
+      "mean_cosine_sim_shopify": 0.6768578886985779,
+      "mean_cosine_sim_etsy": 0.7073646187782288,
+      "mean_cosine_sim_ebay": 0.6919665932655334,
+      "knn_accuracy": 0.4936708860759494,
+      "clip_diversity_mean_pairwise_distance": 0.366673082113266,
+      "clip_diversity_mean_pairwise_similarity": 0.6333269476890564,
+      "clip_diversity_mean_nearest_neighbor_similarity": 0.8137962222099304,
+      "clip_diversity_sample_count": 79.0,
+      "fid": 251.5943460645123
+    }
+  }
+}
