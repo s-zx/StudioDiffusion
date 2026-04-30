@@ -53,6 +53,10 @@ def main() -> None:
     ebay_lora_refresh = load_json(ebay_lora_refresh_path) if ebay_lora_refresh_path.exists() else None
     final_eval_metrics_path = RESULTS_DIR / "final_eval_metrics.csv"
     final_eval_metrics = load_csv(final_eval_metrics_path) if final_eval_metrics_path.exists() else []
+    final_eval_local_env_path = RESULTS_DIR / "final_eval_metrics_local_env.csv"
+    final_eval_local_env = (
+        load_csv(final_eval_local_env_path) if final_eval_local_env_path.exists() else []
+    )
 
     overfit_paths = {
         "shopify": RESULTS_DIR / "ip_adapter_shopify_overfit.json",
@@ -198,7 +202,55 @@ def main() -> None:
             ],
         )
 
-    # Table 7: figure manifest
+    # Table 7: metric reproducibility across environments
+    env_comparison_rows = []
+    if final_eval_rows and final_eval_local_env:
+        local_env_index = {
+            (row["platform"], row["adapter"]): row for row in final_eval_local_env
+        }
+        for row in final_eval_rows:
+            key = (row["platform"], row["adapter"])
+            if key not in local_env_index:
+                continue
+            local = local_env_index[key]
+            env_comparison_rows.append(
+                {
+                    "platform": row["platform"],
+                    "adapter": row["adapter"],
+                    "clip_sim_primary": row["mean_cosine_sim"],
+                    "clip_sim_local_env": round(float(local["mean_cosine_sim"]), 3),
+                    "clip_sim_delta": round(
+                        float(local["mean_cosine_sim"]) - float(row["mean_cosine_sim"]), 3
+                    ),
+                    "knn_primary": row["knn_accuracy"],
+                    "knn_local_env": round(float(local["knn_accuracy"]), 3),
+                    "knn_delta": round(
+                        float(local["knn_accuracy"]) - float(row["knn_accuracy"]), 3
+                    ),
+                    "fid_primary": row["fid"],
+                    "fid_local_env": round(float(local["fid"]), 3),
+                    "fid_delta": round(float(local["fid"]) - float(row["fid"]), 3),
+                }
+            )
+        write_csv(
+            RESULTS_DIR / "sd30_metric_reproducibility.csv",
+            env_comparison_rows,
+            [
+                "platform",
+                "adapter",
+                "clip_sim_primary",
+                "clip_sim_local_env",
+                "clip_sim_delta",
+                "knn_primary",
+                "knn_local_env",
+                "knn_delta",
+                "fid_primary",
+                "fid_local_env",
+                "fid_delta",
+            ],
+        )
+
+    # Table 8: figure manifest
     figure_rows = [
         {
             "figure_id": "fig:overview",
@@ -310,6 +362,29 @@ def main() -> None:
             for row in final_eval_rows
         ],
     ) if final_eval_rows else ""
+    env_comparison_md = markdown_table(
+        [
+            "Platform",
+            "Adapter",
+            "CLIP Sim (Primary)",
+            "CLIP Sim (Local Env)",
+            "kNN (Primary)",
+            "kNN (Local Env)",
+            "FID Delta",
+        ],
+        [
+            [
+                row["platform"],
+                row["adapter"],
+                row["clip_sim_primary"],
+                row["clip_sim_local_env"],
+                row["knn_primary"],
+                row["knn_local_env"],
+                row["fid_delta"],
+            ]
+            for row in env_comparison_rows
+        ],
+    ) if env_comparison_rows else ""
 
     galleries = [
         "final eval clean val/galleries/overview_first_8_per_combo.jpg",
@@ -343,6 +418,10 @@ Generated from `final eval clean val/metadata/*` and local SD-21 overfitting out
 ## Table 5. Final-eval quality metrics
 
 {final_eval_md}
+
+## Table 6. Metric reproducibility across local environments
+
+{env_comparison_md}
 
 ## Evaluation setup summary
 
@@ -380,6 +459,7 @@ Generated from `final eval clean val/metadata/*` and local SD-21 overfitting out
 - Category counts are deduplicated by clean validation case so the same product is not double-counted across LoRA and IP-Adapter outputs.
 - The updated package refreshes the eBay LoRA slice to the best-confirmed `lr=2e-4, step=3000` checkpoint when `metadata/ebay_lora_lr2e-4_s3000_training_summary.json` is present.
 - The clean-eval package now supports image-space metrics using the paired `final eval original inputs` bundle; `results/final_eval_metrics.csv` summarizes CLIP alignment, diversity, and FID for all six platform-adapter combinations.
+- A second reproduction file, `results/final_eval_metrics_local_env.csv`, captures the same CLIP-based metrics from another local environment and shows that ranking trends are stable while CLIP absolute values drift across environments.
 - SD-21 local train/val overfitting analyses are incorporated here through the `results/ip_adapter_*_overfit.json` files.
 - The qualitative contact sheets include both strong examples and visible failure modes; this is useful for an honest final report discussion section.
 """
@@ -401,6 +481,8 @@ We generated a leakage-free clean validation set using `data/platform_sets_clean
 
 {final_eval_md}
 
+{env_comparison_md}
+
 These results show that the clean validation protocol is balanced across platform-adapter combinations, with {generation_status["counts"]["generated"]} / {generation_status["total"]} runs completing successfully. IP-Adapter runs were consistently slower than LoRA runs by roughly 1.2 to 1.7 seconds per sample in this clean-eval export. Overfitting analysis on the published IP-Adapter checkpoints indicates that Etsy is the only platform with a meaningful post-optimum validation-loss increase, while Shopify and eBay remain effectively stable through the final checkpoint.
 """
     if ebay_lora_refresh:
@@ -420,6 +502,14 @@ These results show that the clean validation protocol is balanced across platfor
             "overfitting signal from training loss. Shopify remains the weakest platform in "
             "platform-alignment terms, while the refreshed eBay LoRA export improves k-NN "
             "accuracy over eBay IP-Adapter and remains competitive on diversity and FID.\n"
+        )
+    if env_comparison_rows:
+        report_section += (
+            "\nA second local-environment reproduction confirms the same broad qualitative story, "
+            "but it also shows that CLIP-derived absolute values drift across environments more "
+            "than FID does. In practice, that means the safest claims are rank-based: Etsy stays "
+            "the strongest-aligned platform, Shopify stays the weakest, and FID remains nearly "
+            "identical across reproductions.\n"
         )
 
     report_section += f"""

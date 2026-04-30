@@ -20,6 +20,9 @@ What was completed in-repo:
   - `results/final_eval_metrics.json`
   - `results/final_eval_metrics.csv`
   - `results/sd21_ip_adapter_final_eval_metrics.csv`
+- Added a second local-environment reproduction for the same held-out image bundle:
+  - `results/final_eval_metrics_local_env.json`
+  - `results/final_eval_metrics_local_env.csv`
 
 ## Final conclusions
 
@@ -71,6 +74,32 @@ Interpretation:
   consistent with the mild overfitting signal from the validation-loss curve.
 - Shopify and eBay remain more mixed in platform classification accuracy, which helps explain why
   the qualitative results feel less cleanly separated there than they do for Etsy.
+
+## Environment reproducibility note
+
+The new `final_eval_metrics_local_env.*` files show that CLIP-derived absolute values shift across
+local environments, while FID is effectively unchanged.
+
+What remained stable across both reproductions:
+
+- Etsy stayed the strongest-aligned platform by both target CLIP similarity and k-NN accuracy.
+- Shopify stayed the weakest platform in CLIP-based alignment.
+- FID values were nearly identical across environments, differing only at very small floating-point
+  scales.
+
+What changed:
+
+- Absolute CLIP similarity values moved downward in the second local environment.
+- k-NN accuracy for Shopify and eBay also shifted downward in the second local environment.
+- CLIP diversity values increased in the second local environment, again indicating that CLIP-based
+  metrics are more environment-sensitive than FID in this setup.
+
+Practical conclusion:
+
+- The safest claims for `SD-21` are trend-based rather than absolute-value-based.
+- The overfitting conclusion itself does **not** change: Etsy is still the only platform with a
+  clear validation-loss rise after its best checkpoint, and the held-out image metrics still place
+  Etsy as the strongest style-specialized adapter family.
 
 ## Remaining non-blocking note
 

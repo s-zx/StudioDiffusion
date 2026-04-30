@@ -63,6 +63,17 @@ Generated from `final eval clean val/metadata/*` and local SD-21 overfitting out
 | ebay | ip_adapter | 0.595 | 0.766 | 0.3 | 249.962 |
 | ebay | lora | 0.684 | 0.759 | 0.304 | 251.594 |
 
+## Table 6. Metric reproducibility across local environments
+
+| Platform | Adapter | CLIP Sim (Primary) | CLIP Sim (Local Env) | kNN (Primary) | kNN (Local Env) | FID Delta |
+| --- | --- | --- | --- | --- | --- | --- |
+| shopify | ip_adapter | 0.746 | 0.669 | 0.333 | 0.213 | -0.0 |
+| shopify | lora | 0.74 | 0.669 | 0.293 | 0.187 | -0.0 |
+| etsy | ip_adapter | 0.852 | 0.825 | 1.0 | 1.0 | 0.0 |
+| etsy | lora | 0.848 | 0.821 | 1.0 | 1.0 | 0.0 |
+| ebay | ip_adapter | 0.766 | 0.7 | 0.595 | 0.481 | 0.0 |
+| ebay | lora | 0.759 | 0.692 | 0.684 | 0.494 | 0.0 |
+
 ## Evaluation setup summary
 
 - Total generated outputs: 468
@@ -107,5 +118,6 @@ Generated from `final eval clean val/metadata/*` and local SD-21 overfitting out
 - Category counts are deduplicated by clean validation case so the same product is not double-counted across LoRA and IP-Adapter outputs.
 - The updated package refreshes the eBay LoRA slice to the best-confirmed `lr=2e-4, step=3000` checkpoint when `metadata/ebay_lora_lr2e-4_s3000_training_summary.json` is present.
 - The clean-eval package now supports image-space metrics using the paired `final eval original inputs` bundle; `results/final_eval_metrics.csv` summarizes CLIP alignment, diversity, and FID for all six platform-adapter combinations.
+- A second reproduction file, `results/final_eval_metrics_local_env.csv`, captures the same CLIP-based metrics from another local environment and shows that ranking trends are stable while CLIP absolute values drift across environments.
 - SD-21 local train/val overfitting analyses are incorporated here through the `results/ip_adapter_*_overfit.json` files.
 - The qualitative contact sheets include both strong examples and visible failure modes; this is useful for an honest final report discussion section.

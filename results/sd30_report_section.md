@@ -36,11 +36,22 @@ We generated a leakage-free clean validation set using `data/platform_sets_clean
 | ebay | ip_adapter | 0.595 | 0.766 | 0.3 | 249.962 |
 | ebay | lora | 0.684 | 0.759 | 0.304 | 251.594 |
 
+| Platform | Adapter | CLIP Sim (Primary) | CLIP Sim (Local Env) | kNN (Primary) | kNN (Local Env) | FID Delta |
+| --- | --- | --- | --- | --- | --- | --- |
+| shopify | ip_adapter | 0.746 | 0.669 | 0.333 | 0.213 | -0.0 |
+| shopify | lora | 0.74 | 0.669 | 0.293 | 0.187 | -0.0 |
+| etsy | ip_adapter | 0.852 | 0.825 | 1.0 | 1.0 | 0.0 |
+| etsy | lora | 0.848 | 0.821 | 1.0 | 1.0 | 0.0 |
+| ebay | ip_adapter | 0.766 | 0.7 | 0.595 | 0.481 | 0.0 |
+| ebay | lora | 0.759 | 0.692 | 0.684 | 0.494 | 0.0 |
+
 These results show that the clean validation protocol is balanced across platform-adapter combinations, with 468 / 468 runs completing successfully. IP-Adapter runs were consistently slower than LoRA runs by roughly 1.2 to 1.7 seconds per sample in this clean-eval export. Overfitting analysis on the published IP-Adapter checkpoints indicates that Etsy is the only platform with a meaningful post-optimum validation-loss increase, while Shopify and eBay remain effectively stable through the final checkpoint.
 
 The refreshed clean-eval package also upgrades the eBay LoRA slice to `ebay_lora_lr2e-4_s3000` (`checkpoints/lora/ebay_lr2e-4_s3000/final`), whose training summary reports a final validation loss of `0.056886`. This means the current qualitative eBay LoRA figures are tied to the best-confirmed LoRA setting rather than the older baseline export.
 
 Image-space metrics on the final-eval bundle add a useful second view. Both Etsy adapters achieve perfect k-NN platform classification and the highest mean CLIP similarity to their target reference set, but they also show the lowest CLIP diversity scores, which is directionally consistent with the mild Etsy overfitting signal from training loss. Shopify remains the weakest platform in platform-alignment terms, while the refreshed eBay LoRA export improves k-NN accuracy over eBay IP-Adapter and remains competitive on diversity and FID.
+
+A second local-environment reproduction confirms the same broad qualitative story, but it also shows that CLIP-derived absolute values drift across environments more than FID does. In practice, that means the safest claims are rank-based: Etsy stays the strongest-aligned platform, Shopify stays the weakest, and FID remains nearly identical across reproductions.
 
 
 ## Qualitative figure plan
