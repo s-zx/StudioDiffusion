@@ -10,7 +10,7 @@ description: >
 
 data:
   platform_dir: "data/platform_sets/shopify"
-  image_size: 512
+  image_size: 1024
   center_crop: true
 
 ip_adapter:

@@ -4,12 +4,6 @@
 # Usage:
 #   bash scripts/run_generate_smoke.sh path/to/product.jpg
 #   bash scripts/run_generate_smoke.sh path/to/product.jpg shopify
-#
-# Notes:
-# - Defaults to the Shopify IP-Adapter checkpoint.
-# - Runs the stable "no ControlNet" path by default. Add --with-controlnet
-#   after the positional args if you want to try the experimental branch.
-# - First run may download SDXL / VAE / CLIP assets from Hugging Face.
 
 set -euo pipefail
 

@@ -25,6 +25,7 @@ ENV/
 data/raw/
 data/processed/
 data/platform_sets/
+data/platform_sets_clean/
 checkpoints/
 outputs/
 runs/
@@ -35,15 +36,22 @@ wandb/
 *.pt
 *.pth
 *.h5
+*.jpg
+*.jpeg
+*.JPG
+*.JPEG
+*.png
+*.PNG
 
 # Local teammate data bundles (large; regenerate with share/pack_data_bundle.sh)
 share/*.tar.gz
+share/final_eval_*/
 
 # AWS credentials / keys
 .env
 *.env
 .aws/
-
+.texenv/
 # OS
 .DS_Store
 Thumbs.db
@@ -59,6 +67,21 @@ Thumbs.db
 logs/
 tmp_smoke/
 
+# LaTeX build artifacts
+*.aux
+*.bbl
+*.blg
+*.out
+*.synctex.gz
+*.fdb_latexmk
+*.fls
+*.toc
+
+# Local report artifacts
+project_report.*
+references.bib
+overview_first_8_per_combo.jpg
+
 # Evaluation artifacts
 results/
 
@@ -70,6 +93,8 @@ StudioDiffusion-datashare-PLATFORM-ONLY-20260409/
 final eval clean val/
 final eval original inputs/
 *.tar.gz
+*.zip
+TEAM_DATA_BUNDLE_README.txt
 
 # Pytest
 .pytest_cache/
@@ -84,5 +109,13 @@ StudioDiffusion.pdf
 .github/
 adapter-pipeline-overview.md
 docs/
+Jira.csv
 # Personal workflow artifacts (superpowers specs / plans) — local only
 docs/superpowers/
+
+# Generated/non-final experiment configs
+configs/tuning/
+configs/ip_adapter/_smoke*.yaml
+configs/ip_adapter/*_v2.yaml
+configs/lora/_smoke*.yaml
+configs/lora/*.yaml.new

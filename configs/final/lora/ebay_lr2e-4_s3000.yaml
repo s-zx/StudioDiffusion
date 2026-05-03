@@ -1,0 +1,56 @@
+defaults:
+  - base
+
+platform: ebay_lr2e-4_s3000
+adapter_type: lora
+
+description: >
+  Final eBay LoRA using the lr2e-4 setting selected from the 250-step
+  adapter quality screen and shortlist image evaluation.
+
+data:
+  platform_dir: data/platform_sets/ebay
+  train_split: 0.8
+  image_size: 1024
+  center_crop: true
+  prompt_template: a product photo, ebay style, utilitarian product listing
+
+lora:
+  rank: 16
+  alpha: 16
+  dropout: 0.0
+  target_modules:
+    - to_q
+    - to_k
+    - to_v
+    - to_out.0
+    - add_q_proj
+    - add_k_proj
+    - add_v_proj
+    - to_add_out
+
+training:
+  max_train_steps: 3000
+  learning_rate: 0.0002
+  train_batch_size: 2
+  validation_steps: 250
+  checkpointing_steps: 500
+  gradient_checkpointing: false
+
+lr_scheduler:
+  num_warmup_steps: 200
+
+selection:
+  base_platform: ebay
+  source_config: configs/tuning/lora/ebay_lr2e-4_s250.yaml
+  source_checkpoint: checkpoints/lora/ebay_lr2e-4_s250/final
+  quality_screen: results/adapter_quality_screen_250_summary.md
+  generated_eval: results/adapter_shortlist_eval_s250_scale010_eval.md
+  control_image_mode: canny
+  inference_lora_scale: 0.10
+  metrics:
+    val_loss_s250: 0.061578
+    target_sim_s250: 0.771651
+    target_margin_vs_best_other_s250: -0.004824
+    source_product_clip_similarity_s250: 0.658131
+    knn_platform_accuracy_s250: 0.000

@@ -155,7 +155,10 @@ def _validate(
         total_loss = 0.0
         n_batches = 0
         wall_start = time.time()
-        weight_dtype = torch.float16 if accelerator.mixed_precision == "fp16" else torch.float32
+        weight_dtype = {"fp16": torch.float16, "bf16": torch.bfloat16}.get(
+            accelerator.mixed_precision,
+            torch.float32,
+        )
 
         for batch in val_loader:
             pixel_values = batch["pixel_values"].to(accelerator.device, dtype=weight_dtype)
@@ -280,6 +283,8 @@ def train(cfg_path: str) -> None:
         alpha=cfg.lora.alpha,
         dropout=cfg.lora.dropout,
     )
+    if cfg.training.gradient_checkpointing:
+        unet.enable_gradient_checkpointing()
     # ── 5. Optimizer ───────────────────────────────────────────────────────
     # Resolve LR: prefer cfg.training.learning_rate (platform yamls put it here),
     # else fall back to cfg.optimizer.learning_rate.
@@ -337,7 +342,7 @@ def train(cfg_path: str) -> None:
     if val_loader is not None:
         val_loader = prepared[4]
     # Auxiliaries don't need prepare (frozen + no grads); just push to device + dtype.
-    weight_dtype = torch.float16 if accelerator.mixed_precision == "fp16" else torch.float32
+    weight_dtype = {"fp16": torch.float16, "bf16": torch.bfloat16}.get(accelerator.mixed_precision, torch.float32)
     vae            = vae.to(accelerator.device, dtype=weight_dtype)
     text_encoder_1 = text_encoder_1.to(accelerator.device, dtype=weight_dtype)
     text_encoder_2 = text_encoder_2.to(accelerator.device, dtype=weight_dtype)
@@ -352,6 +357,7 @@ def train(cfg_path: str) -> None:
     # ── 10. Training loop ──────────────────────────────────────────────────
     global_step = 0
     done = False
+    last_validation_step: int | None = None
     steps_per_epoch = math.ceil(len(dataloader) / cfg.training.gradient_accumulation_steps)
     num_epochs = math.ceil(cfg.training.max_train_steps / steps_per_epoch)
     progress = tqdm(total=cfg.training.max_train_steps, disable=not accelerator.is_main_process)
@@ -376,6 +382,8 @@ def train(cfg_path: str) -> None:
                 ).long()
 
                 noisy_latents = noise_scheduler.add_noise(latents, noise, timestamps)
+                if cfg.training.gradient_checkpointing:
+                    noisy_latents.requires_grad_(True)
                 prompts = batch["prompt"]
                 tokens_1 = tokenizer_1(
                     prompts,
@@ -466,6 +474,7 @@ def train(cfg_path: str) -> None:
                         global_step,
                         train_log,
                     )
+                    last_validation_step = global_step
                 if global_step % cfg.training.checkpointing_steps == 0 and accelerator.is_main_process:
                     save_lora_weights(
                         accelerator.unwrap_model(unet),
@@ -478,7 +487,7 @@ def train(cfg_path: str) -> None:
                     done = True
                     break
 
-    if val_loader is not None:
+    if val_loader is not None and last_validation_step != global_step:
         _validate(
             unet,
             val_loader,

@@ -35,7 +35,7 @@ from .layers import LoRALinear
 # SDXL attention projections we adapt by default.
 # - Self-attn (attn1) and cross-attn (attn2): to_q / to_k / to_v / to_out.0
 # - SDXL's *added* cross-attention (text-time conditioning): add_q_proj / add_k_proj / add_v_proj / to_add_out
-# Dropping the "add_*" entries silently breaks SDXL — see copilot-instructions.
+# Dropping the "add_*" entries silently breaks SDXL.
 DEFAULT_TARGET_MODULES: tuple[str, ...] = (
     "to_q",
     "to_k",
@@ -59,16 +59,7 @@ def _get_parent(root: nn.Module, dotted_path: str) -> tuple[nn.Module, str]:
     Example:
         path = "down_blocks.0.attentions.0.transformer_blocks.0.attn1.to_q"
         returns (root.down_blocks[0]...attn1, "to_q")
-
-    Notes
-    -----
-    - Supports both `nn.Module` attributes (use `getattr`) and integer
-      indices into `nn.ModuleList` / `nn.Sequential` (use `int(...)`).
-    - The caller can then do `setattr(parent, leaf, new_child)` (or
-      `parent[int(leaf)] = new_child` for list-like parents).
     """
-    # TODO: split dotted_path on ".", walk all but the last segment,
-    #       returning (current_module, last_segment).
     parts = dotted_path.split('.')
     current_module = root
     for part in parts[:-1]:
@@ -138,20 +129,6 @@ def inject_lora_into_unet(
     -------
     list[nn.Parameter]
         The LoRA `lora_A` / `lora_B` parameters, in injection order.
-
-    Implementation hints
-    --------------------
-    1. Freeze everything first:    `unet.requires_grad_(False)`.
-    2. Snapshot `list(unet.named_modules())` BEFORE mutating — replacing a
-       child mid-iteration on the live generator can skip or revisit nodes.
-    3. For each (name, module): if `_name_matches_target(name, target_modules)`
-       AND `isinstance(module, nn.Linear)`:
-         a. parent, leaf = `_get_parent(unet, name)`
-         b. new = `LoRALinear(module, rank=rank, alpha=alpha, dropout=dropout)`
-         c. `_set_submodule(parent, leaf, new)`
-         d. extend trainable list with `new.lora_A`, `new.lora_B`
-            (these already have `requires_grad=True` from `nn.Parameter`).
-    4. If `verbose`: count trainable vs total and print.
     """
     unet.requires_grad_(False)
     module_snapshot=list(unet.named_modules())
@@ -206,16 +183,6 @@ def save_lora_weights(
     -------
     Path
         Path to the written `.safetensors` file.
-
-    Implementation hints
-    --------------------
-    1. Walk `unet.named_modules()`; for each `LoRALinear` instance at path `p`,
-       contribute two entries to a dict:
-         f"unet.{p}.lora.down.weight" -> module.lora_A.detach().cpu()
-         f"unet.{p}.lora.up.weight"   -> module.lora_B.detach().cpu()
-    2. `safetensors_save(state_dict, str(save_dir / "pytorch_lora_weights.safetensors"))`.
-    3. If any of (rank, alpha, target_modules) is not None, also dump
-       `lora_config.json`. Use `list(target_modules)` to make it JSON-able.
     """
     save_dir=Path(save_directory)
     save_dir.mkdir(parents=True, exist_ok=True)
@@ -252,25 +219,6 @@ def load_lora_weights(
 
     Returns the list of trainable LoRA params (same contract as
     `inject_lora_into_unet`) so callers can resume training if they want.
-
-    Implementation hints
-    --------------------
-    1. cfg_path = load_directory / "lora_config.json"; if it exists, read
-       rank / alpha / target_modules from it (kwargs override → write to `cfg`
-       if explicitly passed).
-    2. trainable = inject_lora_into_unet(unet, target_modules=cfg["target_modules"],
-                                         rank=cfg["rank"], alpha=cfg["alpha"],
-                                         dropout=dropout)
-    3. state = safetensors_load(str(load_directory / "pytorch_lora_weights.safetensors"))
-    4. For each key f"unet.{p}.lora.down.weight" → tensor T:
-         - locate the LoRALinear at `p` (re-walk named_modules into a dict for O(1) lookup)
-         - module.lora_A.data.copy_(T)        # in-place; preserves Parameter identity
-       Same for "lora.up.weight" -> lora_B.
-    5. Return `trainable`.
-
-    Note: external code (e.g. `inference/generate.py`) can also call
-    `pipe.load_lora_weights(load_directory)` directly — diffusers will handle
-    the same key format. This function is for our own training/eval pipeline.
     """
     load_dir = Path(load_directory)
     cfg_path = load_dir / "lora_config.json"

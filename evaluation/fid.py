@@ -2,7 +2,7 @@
 Fréchet Inception Distance (FID) for generated image sets.
 
 This implementation uses torchvision's Inception v3 pooled features and keeps
-the API intentionally small for project evaluation scripts.
+the API small for project evaluation scripts.
 """
 
 from __future__ import annotations

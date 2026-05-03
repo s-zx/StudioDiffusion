@@ -39,23 +39,17 @@ class LoRALinear(nn.Module):
         dropout: float = 0.0,
     ) -> None:
         super().__init__()
-        # TODO: validate rank > 0
         if rank <= 0:
             raise ValueError(f"Invalid rank {rank}: must be > 0")
 
-        # TODO: store base, rank, alpha, and compute self.scaling = alpha / rank
         self.base = base
         self.rank = rank
         self.alpha = alpha
         self.scaling = alpha / rank
 
-        # TODO: pull in_features / out_features from base
         in_features = base.in_features
         out_features = base.out_features
 
-        # TODO: create trainable low-rank matrices
-        #   lora_A: shape (rank, in_features), init with kaiming_uniform_(a=math.sqrt(5))
-        #   lora_B: shape (out_features, rank), init to zeros
         if rank > 0: 
             self.lora_A=nn.Parameter(torch.empty(rank,in_features))
             nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
@@ -64,11 +58,7 @@ class LoRALinear(nn.Module):
         for p in self.base.parameters():
             p.requires_grad_(False)
 
-        # TODO: dropout on the LoRA branch input
-        #   if dropout > 0: nn.Dropout(p=dropout) else nn.Identity()
         self.lora_dropout: nn.Module = nn.Dropout(p=dropout) if dropout > 0 else nn.Identity()
-
-        # TODO: freeze every parameter in self.base (requires_grad_(False))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """

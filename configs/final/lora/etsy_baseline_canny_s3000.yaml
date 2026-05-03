@@ -1,0 +1,55 @@
+defaults:
+  - base
+
+platform: etsy_final_lora_baseline_canny_s3000
+adapter_type: lora
+
+description: >
+  Final Etsy LoRA selected from the 250-step adapter quality screen and
+  three-seed Canny-conditioned generated-image evaluation.
+
+data:
+  platform_dir: data/platform_sets/etsy
+  train_split: 0.8
+  image_size: 1024
+  center_crop: true
+  prompt_template: a product photo, etsy style, warm lifestyle aesthetic
+
+lora:
+  rank: 16
+  alpha: 16
+  dropout: 0.0
+  target_modules:
+    - to_q
+    - to_k
+    - to_v
+    - to_out.0
+    - add_q_proj
+    - add_k_proj
+    - add_v_proj
+    - to_add_out
+
+training:
+  max_train_steps: 3000
+  learning_rate: 0.0001
+  train_batch_size: 2
+  validation_steps: 250
+  checkpointing_steps: 500
+  gradient_checkpointing: false
+
+lr_scheduler:
+  num_warmup_steps: 200
+
+selection:
+  base_platform: etsy
+  source_config: configs/tuning/lora/etsy_baseline_s250.yaml
+  source_checkpoint: checkpoints/lora/etsy_baseline_s250/final
+  generated_eval: results/adapter_shortlist_eval_s250_scale010_canny_seeds3_eval.md
+  control_image_mode: canny
+  inference_lora_scale: 0.10
+  metrics:
+    val_loss: 0.121424
+    target_sim: 0.770584
+    target_margin_vs_best_other: 0.018514
+    source_product_clip_similarity: 0.725336
+    knn_platform_accuracy: 0.667

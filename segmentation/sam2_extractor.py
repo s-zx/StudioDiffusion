@@ -20,14 +20,19 @@ mask = extractor.extract(image)   # np.ndarray H×W bool
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 
 import numpy as np
 from PIL import Image
 
+SAM2_PACKAGE_PARENT = Path(__file__).resolve().parents[1] / "segmentation_models"
+if str(SAM2_PACKAGE_PARENT) not in sys.path:
+    sys.path.insert(0, str(SAM2_PACKAGE_PARENT))
+
 try:
-    from segmentation_models.sam2.build_sam import build_sam2
+    from sam2.build_sam import build_sam2
     #from segmentation_models.sam2.sam2_image_predictor import SAM2ImagePredictor
-    from segmentation_models.sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
+    from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
     _SAM2_AVAILABLE = True
 except ImportError:
     _SAM2_AVAILABLE = False
@@ -36,8 +41,8 @@ except ImportError:
 class SAM2Extractor:
     """Zero-shot foreground mask extraction using Segment Anything 2."""
 
-    DEFAULT_CHECKPOINT = "checkpoints/sam2_hiera_large.pt"
-    DEFAULT_CONFIG = "sam2_hiera_l.yaml"
+    DEFAULT_CHECKPOINT = "checkpoints/sam2.1_hiera_large.pt"
+    DEFAULT_CONFIG = "configs/sam2.1/sam2.1_hiera_l.yaml"
 
     def __init__(
         self,

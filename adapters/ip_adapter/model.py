@@ -18,6 +18,7 @@ Reference: https://arxiv.org/abs/2308.06721
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import torch
@@ -41,11 +42,25 @@ class ImageProjModel(nn.Module):
         clip_embed_dim: int = 1024,
         cross_attention_dim: int = 2048,
         num_tokens: int = 16,
+        hidden_size: int | None = None,
     ) -> None:
         super().__init__()
+        if num_tokens <= 0:
+            raise ValueError(f"num_tokens must be positive, got {num_tokens}")
+        if hidden_size is not None and hidden_size <= 0:
+            raise ValueError(f"hidden_size must be positive or None, got {hidden_size}")
         self.num_tokens = num_tokens
         self.cross_attention_dim = cross_attention_dim
-        self.proj = nn.Linear(clip_embed_dim, num_tokens * cross_attention_dim)
+        self.hidden_size = hidden_size
+        output_dim = num_tokens * cross_attention_dim
+        if hidden_size is None:
+            self.proj = nn.Linear(clip_embed_dim, output_dim)
+        else:
+            self.proj = nn.Sequential(
+                nn.Linear(clip_embed_dim, hidden_size),
+                nn.GELU(),
+                nn.Linear(hidden_size, output_dim),
+            )
         self.norm = nn.LayerNorm(cross_attention_dim)
 
     def forward(self, image_embeds: torch.Tensor) -> torch.Tensor:
@@ -175,12 +190,15 @@ class IPAdapterSDXL(nn.Module):
         image_encoder_id: str = "openai/clip-vit-large-patch14-336",
         num_tokens: int = 16,
         adapter_scale: float = 1.0,
+        proj_hidden_size: int | None = None,
         local_files_only: bool = False,
     ) -> None:
         super().__init__()
         self.unet = unet
+        self.image_encoder_id = image_encoder_id
         self.adapter_scale = adapter_scale
         self.num_tokens = num_tokens
+        self.proj_hidden_size = proj_hidden_size
 
         self.image_encoder = CLIPVisionModelWithProjection.from_pretrained(
             image_encoder_id,
@@ -205,6 +223,7 @@ class IPAdapterSDXL(nn.Module):
             clip_embed_dim=clip_embed_dim,
             cross_attention_dim=cross_attn_dim,
             num_tokens=num_tokens,
+            hidden_size=proj_hidden_size,
         )
 
         self._add_ip_attention_layers(unet, cross_attn_dim)
@@ -297,6 +316,16 @@ class IPAdapterSDXL(nn.Module):
                 for k, v in proc.state_dict().items():
                     ip_state[f"{name}.{k}"] = v
         torch.save(ip_state, save_directory / "ip_attn_processors.pt")
+        config = {
+            "image_encoder_id": self.image_encoder_id,
+            "num_tokens": self.num_tokens,
+            "adapter_scale": self.adapter_scale,
+            "proj_hidden_size": self.proj_hidden_size,
+        }
+        (save_directory / "ip_adapter_config.json").write_text(
+            json.dumps(config, indent=2) + "\n",
+            encoding="utf-8",
+        )
 
     @classmethod
     def load_pretrained(
@@ -306,6 +335,10 @@ class IPAdapterSDXL(nn.Module):
         **kwargs,
     ) -> "IPAdapterSDXL":
         load_directory = Path(load_directory)
+        config_path = load_directory / "ip_adapter_config.json"
+        if config_path.exists():
+            saved_config = json.loads(config_path.read_text(encoding="utf-8"))
+            kwargs = {**saved_config, **kwargs}
         adapter = cls(unet, **kwargs)
         adapter.image_proj_model.load_state_dict(
             torch.load(load_directory / "image_proj_model.pt", map_location="cpu")

@@ -8,8 +8,15 @@
 
 set -euo pipefail
 
-PLATFORM="${1:-shopify}"
-CONFIG="configs/ip_adapter/${PLATFORM}.yaml"
+TARGET="${1:-shopify}"
+
+if [[ "$TARGET" == *.yaml ]]; then
+  CONFIG="$TARGET"
+  PLATFORM="$(basename "$TARGET" .yaml)"
+else
+  PLATFORM="$TARGET"
+  CONFIG="configs/ip_adapter/${PLATFORM}.yaml"
+fi
 
 if [[ ! -f "$CONFIG" ]]; then
   echo "Config not found: $CONFIG"
@@ -18,13 +25,18 @@ fi
 
 echo "=== Training IP-Adapter for platform: $PLATFORM ==="
 
+if [[ -f ".venv/bin/activate" ]]; then
+  # shellcheck disable=SC1091
+  source .venv/bin/activate
+fi
+
 # PYTHONPATH puts the repo root on sys.path so `from adapters.ip_adapter.model import ...`
 # in train.py resolves. (pip install -e . is broken by the pyproject.toml build-backend
 # typo, and accelerate launch passes the script as a path, which only adds the script's
 # own directory to sys.path — not the repo root.)
 # MPS fallback handles a small number of ops not yet implemented on Apple Silicon.
 PYTHONPATH="${PWD}:${PYTHONPATH:-}" PYTORCH_ENABLE_MPS_FALLBACK=1 accelerate launch \
-  --mixed_precision no \
+  --mixed_precision bf16 \
   --num_processes 1 \
   adapters/ip_adapter/train.py \
   --config "$CONFIG"

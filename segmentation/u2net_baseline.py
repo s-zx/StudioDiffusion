@@ -82,7 +82,7 @@ class U2NetExtractor:
 
         orig_size = pil.size  # (W, H)
         inp = _TRANSFORM(pil).unsqueeze(0).to(self.device)
-        d0, _ = self.model(inp)
+        d0 = self.model(inp)[0]
         prob = d0.squeeze().cpu().numpy()
         prob_resized = np.array(
             Image.fromarray((prob * 255).astype(np.uint8)).resize(orig_size, Image.BILINEAR)

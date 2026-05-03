@@ -28,9 +28,10 @@ from accelerate.utils import ProjectConfiguration
 from diffusers import (
     AutoencoderKL,
     DDPMScheduler,
-    StableDiffusionXLPipeline,
     UNet2DConditionModel,
 )
+from diffusers.optimization import get_scheduler
+from diffusers.training_utils import compute_snr
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
@@ -154,6 +155,16 @@ class ProductDataset(Dataset):
 # Training
 # ---------------------------------------------------------------------------
 
+def _dtype_for_device(mixed_precision: str | None, device: torch.device) -> torch.dtype:
+    if device.type != "cuda":
+        return torch.float32
+    if mixed_precision == "bf16":
+        return torch.bfloat16
+    if mixed_precision == "fp16":
+        return torch.float16
+    return torch.float32
+
+
 @torch.no_grad()
 def _validate(
     adapter,
@@ -168,6 +179,7 @@ def _validate(
     cfg,
     global_step: int,
     log_path: Path,
+    model_dtype: torch.dtype,
 ) -> float:
     """Run one full pass over the val loader and log mean MSE.
 
@@ -183,8 +195,8 @@ def _validate(
         wall_start = time.time()
 
         for batch in val_loader:
-            pixel_values = batch["pixel_values"].to(accelerator.device)
-            clip_pixel_values = batch["clip_pixel_values"].to(accelerator.device, dtype=torch.float32)
+            pixel_values = batch["pixel_values"].to(accelerator.device, dtype=model_dtype)
+            clip_pixel_values = batch["clip_pixel_values"].to(accelerator.device, dtype=model_dtype)
 
             latents = vae.encode(pixel_values).latent_dist.sample(generator=gen)
             latents = latents * vae.config.scaling_factor
@@ -218,7 +230,7 @@ def _validate(
             add_time_ids = torch.tensor(
                 [[cfg.data.image_size, cfg.data.image_size, 0, 0,
                   cfg.data.image_size, cfg.data.image_size]] * bsz,
-                dtype=torch.float32, device=accelerator.device,
+                dtype=model_dtype, device=accelerator.device,
             )
 
             image_prompt_embeds, _ = accelerator.unwrap_model(adapter).encode_image(
@@ -262,17 +274,15 @@ def train(cfg_path: str) -> None:
         log_with=cfg.logging.report_to,
         project_config=proj_cfg,
     )
+    model_dtype = _dtype_for_device(accelerator.mixed_precision, accelerator.device)
 
     # ---- Models ----
-    # Force fp32 explicitly — some SDXL weight files default to fp16 storage
-    # (e.g. text_encoder_2 as `*.fp16.safetensors`, madebyollin VAE is fp16-first),
-    # which mixes dtypes in cross-attention on MPS and raises at SDPA.
     tokenizer_1 = CLIPTokenizer.from_pretrained(cfg.model.base, subfolder="tokenizer")
     tokenizer_2 = CLIPTokenizer.from_pretrained(cfg.model.base, subfolder="tokenizer_2")
-    text_encoder_1 = CLIPTextModel.from_pretrained(cfg.model.base, subfolder="text_encoder", torch_dtype=torch.float32)
-    text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(cfg.model.base, subfolder="text_encoder_2", torch_dtype=torch.float32)
-    vae = AutoencoderKL.from_pretrained(cfg.model.vae, torch_dtype=torch.float32)
-    unet = UNet2DConditionModel.from_pretrained(cfg.model.base, subfolder="unet", torch_dtype=torch.float32)
+    text_encoder_1 = CLIPTextModel.from_pretrained(cfg.model.base, subfolder="text_encoder", torch_dtype=model_dtype)
+    text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(cfg.model.base, subfolder="text_encoder_2", torch_dtype=model_dtype)
+    vae = AutoencoderKL.from_pretrained(cfg.model.vae, torch_dtype=model_dtype)
+    unet = UNet2DConditionModel.from_pretrained(cfg.model.base, subfolder="unet", torch_dtype=model_dtype)
     noise_scheduler = DDPMScheduler.from_pretrained(cfg.model.base, subfolder="scheduler")
 
     adapter = IPAdapterSDXL(
@@ -280,7 +290,9 @@ def train(cfg_path: str) -> None:
         image_encoder_id=cfg.ip_adapter.image_encoder,
         num_tokens=cfg.ip_adapter.num_tokens,
         adapter_scale=cfg.ip_adapter.adapter_scale,
+        proj_hidden_size=cfg.ip_adapter.get("proj_hidden_size", None),
     )
+    adapter = adapter.to(dtype=model_dtype)
 
     if cfg.training.gradient_checkpointing:
         # Enable on the unet AFTER IPAdapterSDXL has injected its IP cross-attn
@@ -293,7 +305,7 @@ def train(cfg_path: str) -> None:
     trainable_params = [p for p in adapter.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(
         trainable_params,
-        lr=cfg.optimizer.learning_rate,
+        lr=float(cfg.training.get("learning_rate", None) or cfg.optimizer.learning_rate),
         betas=(cfg.optimizer.beta1, cfg.optimizer.beta2),
         weight_decay=cfg.optimizer.weight_decay,
         eps=cfg.optimizer.epsilon,
@@ -323,30 +335,31 @@ def train(cfg_path: str) -> None:
         cfg.training.max_train_steps
         / math.ceil(len(dataloader) / cfg.training.gradient_accumulation_steps)
     )
-    lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer,
-        T_max=cfg.training.max_train_steps - cfg.lr_scheduler.num_warmup_steps,
-        eta_min=0,
+    lr_scheduler = get_scheduler(
+        name=cfg.lr_scheduler.type,
+        optimizer=optimizer,
+        num_warmup_steps=cfg.lr_scheduler.num_warmup_steps,
+        num_training_steps=cfg.training.max_train_steps,
     )
 
     adapter, optimizer, dataloader, lr_scheduler, val_loader = accelerator.prepare(
         adapter, optimizer, dataloader, lr_scheduler, val_loader
     )
     train_log = output_dir / "train.log"
-    vae = vae.to(accelerator.device)
-    text_encoder_1 = text_encoder_1.to(accelerator.device)
-    text_encoder_2 = text_encoder_2.to(accelerator.device)
+    vae = vae.to(accelerator.device, dtype=model_dtype)
+    text_encoder_1 = text_encoder_1.to(accelerator.device, dtype=model_dtype)
+    text_encoder_2 = text_encoder_2.to(accelerator.device, dtype=model_dtype)
 
     global_step = 0
+    last_validation_step: int | None = None
     progress_bar = tqdm(total=cfg.training.max_train_steps, disable=not accelerator.is_local_main_process)
 
     for epoch in range(num_epochs):
         adapter.train()
         for batch in dataloader:
             with accelerator.accumulate(adapter):
-                pixel_values = batch["pixel_values"].to(accelerator.device)
-                # CLIP encoder expects fp32; keep on same device
-                clip_pixel_values = batch["clip_pixel_values"].to(accelerator.device, dtype=torch.float32)
+                pixel_values = batch["pixel_values"].to(accelerator.device, dtype=model_dtype)
+                clip_pixel_values = batch["clip_pixel_values"].to(accelerator.device, dtype=model_dtype)
 
                 # Encode images to latent space
                 latents = vae.encode(pixel_values).latent_dist.sample()
@@ -360,6 +373,8 @@ def train(cfg_path: str) -> None:
                     (bsz,), device=latents.device
                 ).long()
                 noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
+                if cfg.training.gradient_checkpointing:
+                    noisy_latents.requires_grad_(True)
 
                 # Text conditioning (SDXL uses pooled + sequence embeddings)
                 tokens_1 = tokenizer_1(
@@ -380,7 +395,7 @@ def train(cfg_path: str) -> None:
                 add_time_ids = torch.tensor(
                     [[cfg.data.image_size, cfg.data.image_size, 0, 0,
                       cfg.data.image_size, cfg.data.image_size]] * bsz,
-                    dtype=torch.float32, device=accelerator.device
+                                        dtype=model_dtype, device=accelerator.device
                 )
 
                 # Image conditioning — project CLIP embeddings to IP-Adapter tokens
@@ -399,7 +414,16 @@ def train(cfg_path: str) -> None:
                     cross_attention_kwargs={"ip_hidden_states": image_prompt_embeds},
                 ).sample
 
-                loss = F.mse_loss(noise_pred.float(), noise.float(), reduction="mean")
+                if cfg.noise.snr_gamma and cfg.noise.snr_gamma > 0:
+                    snr = compute_snr(noise_scheduler, timesteps)
+                    gamma = torch.full_like(snr, float(cfg.noise.snr_gamma))
+                    mse_weights = torch.minimum(snr, gamma) / snr
+                    per_sample = F.mse_loss(
+                        noise_pred.float(), noise.float(), reduction="none"
+                    ).mean(dim=[1, 2, 3])
+                    loss = (per_sample * mse_weights).mean()
+                else:
+                    loss = F.mse_loss(noise_pred.float(), noise.float(), reduction="mean")
                 accelerator.backward(loss)
 
                 if accelerator.sync_gradients:
@@ -412,6 +436,12 @@ def train(cfg_path: str) -> None:
                 progress_bar.update(1)
                 global_step += 1
                 progress_bar.set_postfix({"loss": loss.item(), "step": global_step})
+                if accelerator.is_main_process:
+                    with open(train_log, "a", encoding="utf-8") as f:
+                        f.write(
+                            f"step={global_step} train_loss={float(loss):.6f} "
+                            f"lr={lr_scheduler.get_last_lr()[0]:.8f}\n"
+                        )
 
                 if global_step % cfg.training.checkpointing_steps == 0:
                     if accelerator.is_main_process:
@@ -422,19 +452,21 @@ def train(cfg_path: str) -> None:
                     _validate(
                         adapter, val_loader, vae,
                         text_encoder_1, text_encoder_2, tokenizer_1, tokenizer_2,
-                        noise_scheduler, accelerator, cfg, global_step, train_log,
+                        noise_scheduler, accelerator, cfg, global_step, train_log, model_dtype,
                     )
+                    last_validation_step = global_step
 
                 if global_step >= cfg.training.max_train_steps:
                     break
 
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
-        _validate(
-            adapter, val_loader, vae,
-            text_encoder_1, text_encoder_2, tokenizer_1, tokenizer_2,
-            noise_scheduler, accelerator, cfg, global_step, train_log,
-        )
+        if last_validation_step != global_step:
+            _validate(
+                adapter, val_loader, vae,
+                text_encoder_1, text_encoder_2, tokenizer_1, tokenizer_2,
+                noise_scheduler, accelerator, cfg, global_step, train_log, model_dtype,
+            )
         accelerator.unwrap_model(adapter).save_pretrained(output_dir / "final")
     accelerator.end_training()
 

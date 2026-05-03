@@ -1,0 +1,45 @@
+defaults:
+  - base
+
+platform: ebay_final_ip_baseline_canny_s3000
+adapter_type: ip_adapter
+
+description: >
+  Final eBay IP-Adapter selected from the 250-step adapter quality screen and
+  three-seed Canny-conditioned generated-image evaluation.
+
+data:
+  platform_dir: data/platform_sets/ebay
+  image_size: 1024
+  center_crop: true
+
+ip_adapter:
+  image_encoder: openai/clip-vit-large-patch14-336
+  proj_hidden_size: 1280
+  num_tokens: 16
+  adapter_scale: 1.0
+
+training:
+  max_train_steps: 3000
+  learning_rate: 0.0001
+  train_batch_size: 2
+  validation_steps: 250
+  checkpointing_steps: 500
+  gradient_checkpointing: false
+
+lr_scheduler:
+  num_warmup_steps: 200
+
+selection:
+  base_platform: ebay
+  source_config: configs/tuning/ip_adapter/ebay_baseline_s250.yaml
+  source_checkpoint: checkpoints/ip_adapter/ebay_baseline_s250/final
+  generated_eval: results/adapter_shortlist_eval_s250_scale010_canny_seeds3_eval.md
+  control_image_mode: canny
+  inference_adapter_scale: 0.10
+  metrics:
+    val_loss: 0.061703
+    target_sim: 0.802261
+    target_margin_vs_best_other: 0.026283
+    source_product_clip_similarity: 0.678677
+    knn_platform_accuracy: 1.0
