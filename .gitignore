@@ -95,6 +95,7 @@ final eval original inputs/
 *.tar.gz
 *.zip
 TEAM_DATA_BUNDLE_README.txt
+Group_Project_Description (2).pdf
 
 # Pytest
 .pytest_cache/

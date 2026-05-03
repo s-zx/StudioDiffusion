@@ -36,18 +36,12 @@ PLATFORM SETS (platform_sets)
 - `data/platform_sets/manifests/*_train.csv` and `*_val.csv` — 80/20 splits and a
   **category** column.
 
-NOTE — `image_path` in the CSVs is the **packager's absolute path** (e.g.
-`/Users/mac/.../data/raw/abo/...`) and will not exist on your computer. The
-manifest-driven `ProductDataset` (`adapters/ip_adapter/train.py`) handles this
-automatically: it derives the on-disk filename from each row's `image_path` using
-the `curate_platform.py` output naming rule (`<parent>_<basename>` first, plain
-`<basename>` as fallback) and looks the file up under
-`data/platform_sets/<platform>/`. You do **not** need to rewrite paths or build
-a custom loader — `bash scripts/train_ip_adapter.sh <platform>` works directly.
+IMPORTANT — `image_path` in CSVs may be **absolute paths** from the packager’s machine
+(e.g. including their username). Those paths will **not** exist on your computer.
 
-If you write your own loader (e.g. for the LoRA track that hasn't migrated yet),
-either reuse `ProductDataset(platform_dir, split, image_size)` or apply the same
-basename-resolution rule yourself.
+For training, prefer loading images by **file name** or by listing files under
+`data/platform_sets/<platform>/`, and use the CSV for **splits and categories** only.
+Alternatively, batch-rewrite `image_path` to **repo-relative** paths.
 
 ABO / DEEPFASHION2 MANIFESTS AND MASKS
 --------------------------------------
